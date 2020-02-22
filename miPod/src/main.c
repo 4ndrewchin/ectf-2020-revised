@@ -106,8 +106,21 @@ void login(char *username, char *pin) {
     }
 
     // drive DRM
-    strcpy((void*)c->username, username);
-    strcpy((void*)c->pin, pin);
+    int r1 = strncpy_s((void*)c->username,USERNAME_SZ_BUF, username, USERNAME_SZ);
+    if (r1 != 0) {
+        mp_printf("Invalid user name/PIN\r\n");
+        memset((void*)c->username, 0, USERNAME_SZ);
+        return;
+    }
+    c->username[strlen(username)] = "\0"; 
+    int r2 = strncpy_s((void*)c->pin, MAX_PIN_SZ_BUF, pin, MAX_PIN_SZ);
+    if (r2 != 0) {
+        mp_printf("Invalid PIN\r\n");
+        memset((void*)c->pin, 0, MAX_PIN_SZ);
+	return;
+
+    }
+    c->pin[strlen(pin)] = "\0"; 
     send_command(LOGIN);
 }
 
@@ -352,6 +365,10 @@ int main(int argc, char** argv)
 
     // open command channel
     mem = open("/dev/uio0", O_RDWR);
+    if (mem < 0) {
+        mp_printf("File Descriptor for /dev/uio0 Failed! Error = %d\r\n", errno);
+        return -1; 
+    }
     c = mmap(NULL, sizeof(cmd_channel), PROT_READ | PROT_WRITE,
              MAP_SHARED, mem, 0);
     if (c == MAP_FAILED){

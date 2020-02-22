@@ -18,6 +18,8 @@
 #define MAX_USERS 64
 #define USERNAME_SZ 64
 #define MAX_PIN_SZ 64
+#define USERNAME_SZ_BUF 65
+#define MAX_PIN_SZ_BUF 65
 #define MAX_SONG_SZ (1<<25)
 
 // printing utility
