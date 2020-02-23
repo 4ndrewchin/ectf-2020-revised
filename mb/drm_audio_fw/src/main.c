@@ -15,6 +15,8 @@
 #include "xintc.h"
 #include "constants.h"
 #include "sleep.h"
+#include "wolfssl/wolfcrypt/hash.h"
+#include "wolfssl/wolfcrypt/sha256.h"
 
 
 //////////////////////// GLOBALS ////////////////////////
@@ -471,6 +473,27 @@ void digital_out() {
 
 
 int main() {
+    // WolfCrypt init
+    if (wolfCrypt_Init() != 0) {
+        mb_printf("ERROR: wolfCrypt_Init call\r\n");
+    }
+    // try hashing=====================================================
+    char data[8];
+    strcpy(data, "hello!!");
+    char hash[256];
+    enum wc_HashType hash_type = WC_HASH_TYPE_SHA256;
+    int hash_len = wc_HashGetDigestSize(hash_type);
+    if (hash_len > 0) {
+        int ret = wc_Hash(hash_type, data, strlen(data), hash, 256);
+        if(ret == 0) {
+            // Success
+            mb_printf("SUCCESS: WOLFCRYPT SHA256(\"hello!!\")\r\n");
+        } else {
+            mb_printf("ERROR: WOLFCRYPT HASHING\r\n");
+        }
+    }
+    //=================================================================
+
     u32 status;
 
     init_platform();
@@ -548,6 +571,10 @@ int main() {
         }
     }
 
+    // WolfCrypt cleanup */
+    if (wolfCrypt_Cleanup() != 0) {
+        mb_printf("ERROR: wolfCrypt_Cleanup call\r\n");
+    }
     cleanup_platform();
     return 0;
 }
