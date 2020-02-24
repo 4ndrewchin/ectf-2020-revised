@@ -53,6 +53,7 @@ internal_state s;
 volatile static int InterruptProcessed = FALSE;
 static XIntc InterruptController;
 
+// TODO: UNDERSTAND THIS
 void myISR(void) {
     InterruptProcessed = TRUE;
 }
@@ -154,6 +155,7 @@ void load_song_md() {
     s.song_md.num_users = c->song.md.num_users;
     memcpy(s.song_md.rids, (void *)get_drm_rids(c->song), s.song_md.num_regions);
     memcpy(s.song_md.uids, (void *)get_drm_uids(c->song), s.song_md.num_users);
+    // TODO: CHECKSUM VERIFY FOR INTEGRITY
 }
 
 
@@ -227,9 +229,11 @@ int gen_song_md(char *buf) {
 void login() {
     if (s.logged_in) {
         mb_printf("Already logged in. Please log out first.\r\n");
+        // TODO: WHY?
         memcpy((void*)c->username, s.username, USERNAME_SZ);
         memcpy((void*)c->pin, s.pin, MAX_PIN_SZ);
     } else {
+        // TODO: POSSIBLE TIMING ATTACK HERE
         for (int i = 0; i < NUM_PROVISIONED_USERS; i++) {
             // search for matching username
             if (!strcmp((void*)c->username, USERNAMES[PROVISIONED_UIDS[i]])) {
@@ -238,6 +242,7 @@ void login() {
                     //update states
                     s.logged_in = 1;
                     c->login_status = 1;
+                    // TODO: TOCTOU HERE?
                     memcpy(s.username, (void*)c->username, USERNAME_SZ);
                     memcpy(s.pin, (void*)c->pin, MAX_PIN_SZ);
                     s.uid = PROVISIONED_UIDS[i];
@@ -346,6 +351,7 @@ void share_song() {
     }
 
     // generate new song metadata
+    // TODO: INTEGER OVERFLOW HERE
     s.song_md.uids[s.song_md.num_users++] = uid;
     new_md_len = gen_song_md(new_md);
     shift = new_md_len - s.song_md.md_size;
@@ -387,6 +393,7 @@ void play_song() {
     rem = length;
     fifo_fill = (u32 *)XPAR_FIFO_COUNT_AXI_GPIO_0_BASEADDR;
 
+    // TODO: do not operate on shared mem
     // write entire file to two-block codec fifo
     // writes to one block while the other is being played
     set_playing();
@@ -477,22 +484,6 @@ int main() {
     if (wolfCrypt_Init() != 0) {
         mb_printf("ERROR: wolfCrypt_Init call\r\n");
     }
-    // try hashing=====================================================
-    char data[8];
-    strcpy(data, "hello!!");
-    char hash[256];
-    enum wc_HashType hash_type = WC_HASH_TYPE_SHA256;
-    int hash_len = wc_HashGetDigestSize(hash_type);
-    if (hash_len > 0) {
-        int ret = wc_Hash(hash_type, data, strlen(data), hash, 256);
-        if(ret == 0) {
-            // Success
-            mb_printf("SUCCESS: WOLFCRYPT SHA256(\"hello!!\")\r\n");
-        } else {
-            mb_printf("ERROR: WOLFCRYPT HASHING\r\n");
-        }
-    }
-    //=================================================================
 
     u32 status;
 
