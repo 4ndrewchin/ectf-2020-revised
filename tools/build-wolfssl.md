@@ -1,5 +1,7 @@
 # Building WolfSSL for Xilinx Microblaze
 
+***YOU DO NOT NEED TO READ THIS UNLESS YOU WANT TO REBUILD WOLFSSL. WOLFSSL HAS ALREADY BEEN BUILT AND PROVIDED IN BRANCH WOLFSSL.***
+
 This document is specifically for cross-compiling WolfSSL for the Xilinx Microblaze soft processor core within the vagrant development environment. For details on setting up the environment, see the [Vagrant README](../vagrant/README.md).
 
 ## Dependencies
