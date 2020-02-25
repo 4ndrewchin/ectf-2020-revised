@@ -22,7 +22,7 @@ $vm_name = "ectf-2020"
 $num_cpus = 2
 
 # Specify the amount of RAM to allocate to the VM (in MB).
-$memory_size = 4096
+$memory_size = 8192
 
 # Set to 'true' to enable the VM's graphical interface and install the Ubuntu
 # Desktop package (ubuntu-desktop). By default, the VM operates in headless
