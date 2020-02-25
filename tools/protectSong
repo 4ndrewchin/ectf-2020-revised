@@ -34,6 +34,9 @@ class ProtectedSong(object):
         protected_wav.setframerate(self.original_song.getframerate())
         protected_wav.writeframes(self.metadata)
 
+        #TODO: self.full_song contains all of the audio data -- encrypt this using AES-256
+        # ENCRYPT HERE
+
         for val in self.full_song:
             protected_wav_val = struct.pack('<h', val)
             protected_wav.writeframesraw(protected_wav_val)
@@ -100,8 +103,24 @@ def main():
         metadata = create_metadata(args.region_list, args.owner, args.user_secrets_path, regions)
     except ValueError:
         raise ValueError('Ensure all user IDs are integers and all regions are in the provided region_information.json')
+
+    #TODO: read key files into program
+    #AES key file is a byte file --> /ectf/tools/global_provisioning/aes_key
+    #RSA private key file is a PEM file --> /ectf/tools/global_provisioning/rsa_private.pem
+    # READ KEY FILES HERE
+
     protected_song = ProtectedSong(args.infile, metadata)
     protected_song.save_secured_song_to_wave(args.outfile)
+
+    #TODO: append RSA signature to secured wav file
+    #wrap wav file metadata on outside or inside?
+    #in other words:
+    #   1. signature + [wav metadata + encrypted audio]
+    #   2. [wav metadata + signature + encrypted audio]
+    #
+    #for option 1, we can append the signature here, after the file has been created in save_secured_song_to_wave
+    #for option 2, we need to append signature inside save_secured_song_to_wave
+    # I am leaning towards option 1, because I'm not sure how wave.open opens a file
 
 
 if __name__ == '__main__':
