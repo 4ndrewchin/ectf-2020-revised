@@ -32,6 +32,8 @@ class ProtectedSong(object):
         protected_wav.setnchannels(self.original_song.getnchannels())
         protected_wav.setsampwidth(self.original_song.getsampwidth())
         protected_wav.setframerate(self.original_song.getframerate())
+        #TODO: APPEND RSA SIGNATURE HERE USING WRITEFRAMES
+        #is signature always same size(should be) -- if not, need to add size so we can skip to read metadata
         protected_wav.writeframes(self.metadata)
 
         #TODO: self.full_song contains all of the audio data -- encrypt this using AES-256
@@ -111,17 +113,6 @@ def main():
 
     protected_song = ProtectedSong(args.infile, metadata)
     protected_song.save_secured_song_to_wave(args.outfile)
-
-    #TODO: append RSA signature to secured wav file
-    #wrap wav file metadata on outside or inside?
-    #in other words:
-    #   1. signature + [wav metadata + encrypted audio]
-    #   2. [wav metadata + signature + encrypted audio]
-    #
-    #for option 1, we can append the signature here, after the file has been created in save_secured_song_to_wave
-    #for option 2, we need to append signature inside save_secured_song_to_wave
-    # I am leaning towards option 1, because I'm not sure how wave.open opens a file
-
 
 if __name__ == '__main__':
     main()

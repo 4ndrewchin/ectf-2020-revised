@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""
+Description: Unprotects song by removing signature, metadata, and decrypting audio
+Use: Once per encrypted song
+"""
+
+import wave
+from argparse import ArgumentParser
+import numpy as np
+from Crypto.Cipher import AES
+
+def unprotect(infile, outfile, aeskeyfile):
+   # read aeskeyfile into byte buffer
+
+   # wave.open infile
+
+   # save wav metadata using getnchannels, getsampwidth, getframerate
+
+   # remove signature
+
+   # decrypt audio using AES key
+
+   # wave.open outfile
+
+   # set outfile metadata to saved wav metadata
+
+   # write decrypted audio using writeframes
+
+   # close file handles and cleanup
+
+   print("TODO")
+
+def main():
+   parser = ArgumentParser(description='main interface to unprotect songs')
+   parser.add_argument('--outfile', help='path to save the unprotected song', required=True)
+   parser.add_argument('--infile', help='path to protected song', required=True)
+   parser.add_argument('--aeskeyfile', help='path to AES key file', required=True)
+   args = parser.parse_args()
+
+   unprotect(args.infile, args.outfile, args.aeskeyfile)
+
+if __name__ == '__main__':
+   main()
