@@ -49,8 +49,6 @@ make src/libwolfssl.la
 
 This section is **NOT IMPORTANT** unless you are rebuilding WolfSSL, as these steps have already been done on branch **wolfssl** in **carlislemc/tamu-ectf-2020**.
 
-*TODO(andrew): merge wolfssl to master*
-
 If you have found the need to further customize the build for WolfSSL, and have already performed the steps above, follow these steps to use in the example project.
 
 1. Copy the library to the lib directory in the DRM board support package.
