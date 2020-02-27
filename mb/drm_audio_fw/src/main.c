@@ -227,41 +227,37 @@ int gen_song_md(char *buf) {
 
 // attempt to log in to the credentials in the shared buffer
 void login() {
+    // first, copy attempted username and pin into local internal_state
+    memcpy(s.username, (void*)c->username, USERNAME_SZ);
+    memcpy(s.pin, (void*)c->pin, MAX_PIN_SZ);
+
+    // clear shared memory
+    memset((void*)c->username, 0, USERNAME_SZ);
+    memset((void*)c->pin, 0, MAX_PIN_SZ);
+
     if (s.logged_in) {
         mb_printf("Already logged in. Please log out first.\r\n");
-        // TODO: WHY?
-        memcpy((void*)c->username, s.username, USERNAME_SZ);
-        memcpy((void*)c->pin, s.pin, MAX_PIN_SZ);
     } else {
-        // TODO: POSSIBLE TIMING ATTACK HERE
+        // TODO: POSSIBLE TIMING ATTACK -- do we care? attacker already knows all valid usernames
         for (int i = 0; i < NUM_PROVISIONED_USERS; i++) {
             // search for matching username
-            if (!strcmp((void*)c->username, USERNAMES[PROVISIONED_UIDS[i]])) {
+            if (!strcmp((void*)s->username, USERNAMES[PROVISIONED_UIDS[i]])) {
                 // check if pin matches
-                if (!strcmp((void*)c->pin, PROVISIONED_PINS[i])) {
+                if (!strcmp((void*)s->pin, PROVISIONED_PINS[i])) {
                     //update states
                     s.logged_in = 1;
                     c->login_status = 1;
-                    // TODO: TOCTOU HERE?
-                    memcpy(s.username, (void*)c->username, USERNAME_SZ);
-                    memcpy(s.pin, (void*)c->pin, MAX_PIN_SZ);
                     s.uid = PROVISIONED_UIDS[i];
-                    mb_printf("Logged in for user '%s'\r\n", c->username);
+                    mb_printf("Logged in for user '%s'\r\n", s->username);
                     return;
                 } else {
-                    // reject login attempt
-                    mb_printf("Incorrect pin for user '%s'\r\n", c->username);
-                    memset((void*)c->username, 0, USERNAME_SZ);
-                    memset((void*)c->pin, 0, MAX_PIN_SZ);
-                    return;
+                    break;
                 }
             }
         }
-
-        // reject login attempt
-        mb_printf("User not found\r\n");
-        memset((void*)c->username, 0, USERNAME_SZ);
-        memset((void*)c->pin, 0, MAX_PIN_SZ);
+        // reject login attempt and wait 5 seconds
+        mb_printf("Login unsuccessful\r\n");
+        usleep(5000000); // TODO: actually must be (5 - max time in loop above) seconds
     }
 }
 
