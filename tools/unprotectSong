@@ -9,11 +9,11 @@ import wave
 import struct
 import numpy as np
 from argparse import ArgumentParser
-from Crypto.Cipher import AES
-from Crypto.Hash import SHA256
-from Crypto.PublicKey import RSA
-from Crypto.Signature import PKCS1_PSS
-from Crypto.Util.Padding import unpad
+from Cryptodome.Cipher import AES
+from Cryptodome.Hash import SHA256
+from Cryptodome.PublicKey import RSA
+from Cryptodome.Signature import pss
+from Cryptodome.Util.Padding import unpad
 
 def unprotect(infile, outfile, aeskey_f, rsapublic_f):
    # read aeskey_f into byte buffer
@@ -49,24 +49,30 @@ def unprotect(infile, outfile, aeskey_f, rsapublic_f):
    # read data and close infile
    nframes = protected.getnframes()
    data = np.frombuffer(protected.readframes(nframes), dtype=np.int16)
+   data = data.tobytes()
    protected.close()
 
    # remove signature
-   end_signature = 256 #because of SHA256
-   signature = bytes(data[:end_signature])
-   md_and_audio = bytes(data[end_signature:])
+   end_signature = 256 # bits, not bytes
+   signature = data[:end_signature]
+   md_and_audio = data[end_signature:]
 
-   verifier = PKCS1_PSS.new(RSA.importKey(rsa_pubkey))
+   verifier = pss.new(RSA.importKey(rsa_pubkey))
    h = SHA256.new(md_and_audio)
-   if verifier.verify(h, signature):
-      print('Success: signature verified')
-   else:
-      print('ERROR: COULD NOT VERIFY SIGNATURE')
+   try:
+      verifier.verify(h, signature)
+   except Exception as e:
+      print('ERROR: COULD NOT VERIFY SIGNATURE: %s' % (e,))
+      return 0
+   print('Success: signature verified')
 
    # decrypt audio using AES key
    md_size = data[end_signature:][0] #first byte of song metadata is length
+   if md_size > 100:
+      print('Something is wrong. Metadata max size is 100, got %s' % md_size)
+      return 0
    start_audio = end_signature+md_size
-   e_audio = bytes(data[start_audio:])
+   e_audio = data[start_audio:]
    iv = e_audio[:AES.block_size]
    cipher = AES.new(aes_key, AES.MODE_CBC, iv)
    try:
@@ -88,10 +94,7 @@ def unprotect(infile, outfile, aeskey_f, rsapublic_f):
    unprotected.setframerate(framerate)
 
    # write decrypted audio using writeframes
-   audio_arr = audio.getBytes("UTF8") #VERIFY IF THIS IS RIGHT
-   for val in audio_arr:
-      unprotected_val = struct.pack('<h', val)
-      unprotected.writeframesraw(unprotected_val)
+   unprotected.writeframes(audio)
 
    # close outfile
    unprotected.close()
@@ -100,11 +103,11 @@ def main():
    parser = ArgumentParser(description='main interface to unprotect songs')
    parser.add_argument('--outfile', help='path to save the unprotected song', required=True)
    parser.add_argument('--infile', help='path to protected song', required=True)
-   parser.add_argument('--aeskeyfile', help='path to AES key file', required=True)
-   parser.add_argument('--rsapublickeyfile', help='path to RSA public key file', required=True)
+   parser.add_argument('--aes', help='path to AES key file', required=True)
+   parser.add_argument('--rsa', help='path to RSA public key file', required=True)
    args = parser.parse_args()
 
-   unprotect(args.infile, args.outfile, args.aeskeyfile, args.rsapublickeyfile)
+   unprotect(args.infile, args.outfile, args.aes, args.rsa)
 
 if __name__ == '__main__':
    main()

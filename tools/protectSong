@@ -9,12 +9,17 @@ import os
 import wave
 from argparse import ArgumentParser
 import numpy as np
+from Cryptodome.Cipher import AES
+from Cryptodome.PublicKey import RSA
+from Cryptodome.Signature import pss
+from Cryptodome.Hash import SHA256
+from Cryptodome.Util.Padding import pad
 
 
 class ProtectedSong(object):
     """Example song object for protected song"""
 
-    def __init__(self, path_to_song, metadata):
+    def __init__(self, path_to_song, metadata, path_to_keys):
         """initialize values
         Args:
             path_to_song (string): file name where the song to be provisioned is stored
@@ -23,6 +28,7 @@ class ProtectedSong(object):
         self.song = path_to_song
         self.full_song, self.original_song = self.read_song(path_to_song)
         self.metadata = metadata
+        self.path_to_keys = path_to_keys
 
     def save_secured_song_to_wave(self, file_location):
         """Saves secured song to wave file assuming all the same characteristics as original song
@@ -32,16 +38,33 @@ class ProtectedSong(object):
         protected_wav.setnchannels(self.original_song.getnchannels())
         protected_wav.setsampwidth(self.original_song.getsampwidth())
         protected_wav.setframerate(self.original_song.getframerate())
-        #TODO: APPEND RSA SIGNATURE HERE USING WRITEFRAMES
-        #is signature always same size(should be) -- if not, need to add size so we can skip to read metadata
+
+        # read AES 256 bit key
+        aes = open(os.path.abspath(self.path_to_keys+'aes_key'),'rb')
+        aes_key = aes.read(32)
+        aes.close()
+
+        # read RSA private key
+        rsapriv = open(os.path.abspath(self.path_to_keys+'rsa_private.pem'),'rb')
+        rsa_privkey = RSA.importKey(rsapriv.read())
+        rsapriv.close()
+
+        # encrypt audio data using AES-256
+        cipher = AES.new(aes_key, AES.MODE_CBC)
+        ct_bytes = cipher.encrypt(pad(bytes(self.full_song), AES.block_size))
+        enc_audio = cipher.iv + ct_bytes
+
+        # hash [metadata + encrypted audio] and then sign
+        h = SHA256.new(self.metadata)
+        h.update(enc_audio)
+        signature = pss.new(rsa_privkey).sign(h)
+        protected_wav.writeframes(signature)
+
+        # write song metadata to file
         protected_wav.writeframes(self.metadata)
 
-        #TODO: self.full_song contains all of the audio data -- encrypt this using AES-256
-        # ENCRYPT HERE
-
-        for val in self.full_song:
-            protected_wav_val = struct.pack('<h', val)
-            protected_wav.writeframesraw(protected_wav_val)
+        # write encrypted audio data to file
+        protected_wav.writeframes(enc_audio)
 
         protected_wav.close()
 
@@ -75,6 +98,9 @@ def create_metadata(regions, user, user_secret_location, region_info):
     Example:
         >>create_metadata(['USA', 'Canada'], 'user1', 'user_secrets.json', {'USA': 1, 'Canada':2})
         'x06/x00/x01/x00/x01/x02'
+    Max users: 64
+    Max regions: 32
+    Max length of metadata is 1+1+1+1+32+63+1 = 100
     """
     user_secrets = json.load(open(os.path.abspath(user_secret_location)))
 
@@ -106,13 +132,24 @@ def main():
     except ValueError:
         raise ValueError('Ensure all user IDs are integers and all regions are in the provided region_information.json')
 
-    #TODO: read key files into program
-    #AES key file is a byte file --> /ectf/tools/global_provisioning/aes_key
-    #RSA private key file is a PEM file --> /ectf/tools/global_provisioning/rsa_private.pem
-    # READ KEY FILES HERE
+    keys_path = get_path(args.user_secrets_path)
 
-    protected_song = ProtectedSong(args.infile, metadata)
+    protected_song = ProtectedSong(args.infile, metadata, keys_path)
     protected_song.save_secured_song_to_wave(args.outfile)
+
+# removes filename from path
+# Ex. './a/b/file.txt' --> './a/b/'
+#     'file.txt'       --> ''
+def get_path(full_path):
+    found = False
+    for i in range(len(full_path)-1, 0, -1):
+        if full_path[i] == '/':
+            found = True
+            break
+    dir = ''
+    if found:
+        dir = full_path[:i] + '/'
+    return dir
 
 if __name__ == '__main__':
     main()

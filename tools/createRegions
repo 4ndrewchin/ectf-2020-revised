@@ -4,15 +4,15 @@ Description: Generates system wide secrets containing all potential regions and 
 Use: Once per ecosystem of devices
 """
 import json
-import io
+import os
 from argparse import ArgumentParser
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import AES
-from Crypto.Random import get_random_bytes
+from Cryptodome.PublicKey import RSA
+from Cryptodome.Cipher import AES
+from Cryptodome.Random import get_random_bytes
 
 def main(region_dict, file_name):
     try:
-        secrets = open(file_name, "w")
+        secrets = open(os.path.abspath(file_name), "w")
     except Exception as e:
         print("Unable to open secrets file: %s" % (e,))
         return 0
@@ -26,7 +26,7 @@ def main(region_dict, file_name):
     # RSA
     rsa_key = RSA.generate(2048)
     try:
-        rsa_public = open(dir+'rsa_public.pem', 'wb')
+        rsa_public = open(os.path.abspath(dir+'rsa_public.pem'), 'wb')
     except Exception as e:
         print("Unable to open rsa public key file: %s" % (e,))
         return 0
@@ -38,7 +38,7 @@ def main(region_dict, file_name):
     rsa_public.close()
 
     try:
-        rsa_private = open(dir+'rsa_private.pem', 'wb')
+        rsa_private = open(os.path.abspath(dir+'rsa_private.pem'), 'wb')
     except Exception as e:
         print("Unable to open rsa private key file: %s" % (e,))
         return 0
@@ -51,7 +51,7 @@ def main(region_dict, file_name):
 
     #AES
     try:
-        aes = open(dir+"aes_key", "wb")
+        aes = open(os.path.abspath(dir+"aes_key"), "wb")
     except Exception as e:
         print("Unable to open aes_key file: %s" % (e,))
         return 0
@@ -62,6 +62,9 @@ def main(region_dict, file_name):
         return 0
     aes.close()
 
+# removes filename from path
+# Ex. './a/b/file.txt' --> './a/b/'
+#     'file.txt'       --> ''
 def get_path(full_path):
     found = False
     for i in range(len(full_path)-1, 0, -1):
