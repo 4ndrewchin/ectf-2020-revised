@@ -29,7 +29,7 @@ def unprotect(infile, outfile, aeskey_f, rsapublic_f):
    try:
       rsa = open(os.path.abspath(rsapublic_f), 'rb')
    except Exception as e:
-      print('Unable to open rsa_public.pem file: %s' % (e,))
+      print('Unable to open rsa_public.der file: %s' % (e,))
       return 0
    rsa_pubkey = rsa.read()
    rsa.close()
@@ -59,12 +59,13 @@ def unprotect(infile, outfile, aeskey_f, rsapublic_f):
 
    verifier = pss.new(RSA.importKey(rsa_pubkey))
    h = SHA256.new(md_and_audio)
+   print('Verifying signature...', end='')
    try:
       verifier.verify(h, signature)
    except Exception as e:
-      print('ERROR: COULD NOT VERIFY SIGNATURE: %s' % (e,))
+      print('error: %s' % (e,))
       return 0
-   print('Success: signature verified')
+   print('success')
 
    # decrypt audio using AES key
    md_size = data[end_signature:][0] #first byte of song metadata is length
@@ -76,7 +77,7 @@ def unprotect(infile, outfile, aeskey_f, rsapublic_f):
    iv = e_audio[:AES.block_size]
    cipher = AES.new(aes_key, AES.MODE_CBC, iv)
    try:
-      audio = unpad(cipher.decrypt(e_audio[AES.block_size:]), AES.block_size)
+      audio = unpad(cipher.decrypt(e_audio[AES.block_size:]), AES.block_size) #use pkcs7
    except Exception as e:
       print('Unable to unpad encrypted audio: %s' % (e,))
       return 0

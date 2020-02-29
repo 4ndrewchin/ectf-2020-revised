@@ -26,24 +26,24 @@ def main(region_dict, file_name):
     # RSA
     rsa_key = RSA.generate(2048)
     try:
-        rsa_public = open(os.path.abspath(dir+'rsa_public.pem'), 'wb')
+        rsa_public = open(os.path.abspath(dir+'rsa_public.der'), 'wb')
     except Exception as e:
         print("Unable to open rsa public key file: %s" % (e,))
         return 0
     try:
-        rsa_public.write(rsa_key.publickey().exportKey('PEM'))
+        rsa_public.write(rsa_key.publickey().exportKey('DER'))
     except Exception as e:
         print("Failed to write to rsa public key file: %s" % (e,))
         return 0
     rsa_public.close()
 
     try:
-        rsa_private = open(os.path.abspath(dir+'rsa_private.pem'), 'wb')
+        rsa_private = open(os.path.abspath(dir+'rsa_private.der'), 'wb')
     except Exception as e:
         print("Unable to open rsa private key file: %s" % (e,))
         return 0
     try:
-        rsa_private.write(rsa_key.exportKey('PEM'))
+        rsa_private.write(rsa_key.exportKey('DER'))
     except Exception as e:
         print("Failed to write to rsa private key file: %s" % (e,))
         return 0

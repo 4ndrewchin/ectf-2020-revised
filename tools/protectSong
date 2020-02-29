@@ -45,14 +45,14 @@ class ProtectedSong(object):
         aes.close()
 
         # read RSA private key
-        rsapriv = open(os.path.abspath(self.path_to_keys+'rsa_private.pem'),'rb')
+        rsapriv = open(os.path.abspath(self.path_to_keys+'rsa_private.der'),'rb')
         rsa_privkey = RSA.importKey(rsapriv.read())
         rsapriv.close()
 
         # encrypt audio data using AES-256
         cipher = AES.new(aes_key, AES.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(bytes(self.full_song), AES.block_size))
-        enc_audio = cipher.iv + ct_bytes
+        ct_bytes = cipher.encrypt(pad(bytes(self.full_song), AES.block_size)) #use pkcs7
+        enc_audio = cipher.iv + ct_bytes #append iv to beginning of encrypted song
 
         # hash [metadata + encrypted audio] and then sign
         h = SHA256.new(self.metadata)
