@@ -29,7 +29,12 @@ Before you begin building, https://www.wolfssl.com/docs/wolfssl-manual/ch2/ will
 We will be cross-compiling WolfSSL for usage on the Xilinx Microblaze soft processor core.
 
 1. Unzip the WolfSSL zip archive and navigate into the folder (we will call the WolfSSL home directory `{wolfssl-home}`).
-2. *** add stuff to settings.h
+2. Add the following lines to `{wolfssl-home/wolfssl/wolfcrypt/settings.h}`:
+```c
+#define NO_WOLFSSL_DIR
+#define SINGLE_THREADED
+#define LITTLE_ENDIAN_ORDER
+```
 3. Run *configure*, disabling unwanted features and enabling wanted features. Notice we are creating a WolfCrypt-only build. (, see 2.3.4 at https://www.wolfssl.com/docs/wolfssl-manual/ch2/)
 ```shell
 ./configure --host microblaze-xilinx-elf --enable-cryptonly --enable-harden --disable-aesgcm --disable-sha512 --disable-sha384 --disable-eccshamir --disable-ecc --disable-dh --disable-md5 --disable-sha --disable-sha224 --disable-sha3 --disable-poly1305 --disable-chacha --disable-filesystem --disable-hashdrbg --disable-examples --disable-crypttests --disable-pkcs12 --disable-rng CFLAGS="-mlittle-endian"
@@ -47,7 +52,7 @@ make src/libwolfssl.la
 
 ## Using WolfSSL in the Insecure Example Design
 
-This section is **NOT IMPORTANT** unless you are rebuilding WolfSSL, as these steps have already been done on branch **wolfssl** in **carlislemc/tamu-ectf-2020**.
+This section is **NOT IMPORTANT** unless you are rebuilding WolfSSL, as these steps have already been done on branch **wolfssl (now merged to master)** in **carlislemc/tamu-ectf-2020**.
 
 If you have found the need to further customize the build for WolfSSL, and have already performed the steps above, follow these steps to use in the example project.
 
