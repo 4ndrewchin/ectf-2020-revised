@@ -89,13 +89,13 @@ const char *PROVISIONED_PINS[] = {{ {", ".join(['"' + user_secrets[u]['pin'] + '
 
 #define RSA_PRIVATE_KEY_SZ {len(rsa_privkey)}
 #define b64RSA_PRIVATE_KEY_SZ {len(b64encode(rsa_privkey))}
-const char *RSA_PRIVATE_KEY = {'"'+str(b64encode(rsa_privkey)).strip("b'")+'"'}
+const char *RSA_PRIVATE_KEY = {'"'+str(b64encode(rsa_privkey)).strip("b'")+'"'};
 
 #define AES_BLK_SZ 16
 #define AES_KEY_SZ {len(aes_key)}
 #define b64AES_KEY_SZ {len(b64encode(aes_key))}
 /* BASE64 DECODE BEFORE USING -- this has been encoded with base64 for storage purposes */
-const char *AES_KEY = {'"'+str(b64encode(aes_key)).strip("b'")+'"'}
+const char *AES_KEY = {'"'+str(b64encode(aes_key)).strip("b'")+'"'};
 
 #endif // SECRETS_H
 ''')
