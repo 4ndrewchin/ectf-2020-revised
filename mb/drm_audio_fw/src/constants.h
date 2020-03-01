@@ -28,7 +28,8 @@
 #define MAX_USERS 64
 #define USERNAME_SZ 64
 #define MAX_PIN_SZ 64
-#define MAX_SONG_SZ (1<<25)
+#define MAX_SONG_SZ (1<<25) // support 128 MB songs
+#define SIGNATURE_SZ 256
 
 
 // LED colors and controller
@@ -70,13 +71,15 @@ typedef struct __attribute__((__packed__)) {
     u32 file_size;
     char packing2[32];
     u32 wav_size;
+    char signature[SIGNATURE_SZ];
     drm_md md;
 } song;
 
 // accessors for variable-length metadata fields
 #define get_drm_rids(d) (d.md.buf)
 #define get_drm_uids(d) (d.md.buf + d.md.num_regions)
-#define get_drm_song(d) ((char *)(&d.md) + d.md.md_size)
+#define get_drm_aesiv(d) ((char *)(&d.md) + d.md.md_size)
+#define get_drm_song(d) ((char *)(&d.md) + d.md.md_size + 16)
 
 
 // shared buffer values
@@ -119,6 +122,7 @@ typedef struct {
     char username[USERNAME_SZ]; // logged on username
     char pin[MAX_PIN_SZ];       // logged on pin
     song_md song_md;            // current song metadata
+    char aesKey[44];            // base64 decoded AES key
 } internal_state;
 
 
