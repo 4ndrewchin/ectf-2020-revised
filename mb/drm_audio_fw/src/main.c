@@ -439,20 +439,20 @@ void play_song() {
         // if first chunk, grab the IV for decryption
         // if not the first chunk, use the previous block as the IV
         if (firstChunk) {
-            strncpy((void *)iv, (void *)(get_drm_aesiv(c->song)), AES_BLK_SZ);
+            memcpy((void *)iv, (void *)(get_drm_aesiv(c->song)), AES_BLK_SZ);
         } else {
-            strncpy((void *)iv, (void *)(get_drm_song(c->song) + length - rem - AES_BLK_SZ), AES_BLK_SZ);
+            memcpy((void *)iv, (void *)(get_drm_song(c->song) + length - rem - AES_BLK_SZ), AES_BLK_SZ);
         }
         firstChunk = FALSE;
 
         /*debug*/mb_printf("getting next chunk");
         // get next chunk
-        strncpy((void *)cipherChunk, (void *)(get_drm_song(c->song) + length - rem), CHUNK_SZ);
+        memcpy((void *)cipherChunk, (void *)(get_drm_song(c->song) + length - rem), CHUNK_SZ);
 
         /*debug*/mb_printf("decrypting current chunk");
         // decrypt chunk
         // TODO: should cipherChunk sz be cp_num or CHUNK_SZ?
-        int ret = wc_AesCbcDecryptWithKey((void*)plainChunk, (void*)cipherChunk, cp_num, (void*)s.aesKey, AES_KEY_SZ, (void*)iv);
+        int ret = wc_AesCbcDecryptWithKey((void*)plainChunk, (void*)cipherChunk, AES_BLK_SZ, (void*)s.aesKey, AES_KEY_SZ, (void*)iv);
         if (ret != 0) {
             mb_printf("Failed to decrypt chunk\r\n");
             return;
