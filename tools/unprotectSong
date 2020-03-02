@@ -6,6 +6,7 @@ Use: Once per encrypted song
 
 import os
 import wave
+import math
 import struct
 import numpy as np
 from argparse import ArgumentParser
@@ -14,6 +15,9 @@ from Cryptodome.Hash import SHA256
 from Cryptodome.PublicKey import RSA
 from Cryptodome.Signature import pss
 from Cryptodome.Util.Padding import unpad
+
+DECRYPT_CHUNKS = False#True
+CHUNK_SZ = 16000
 
 def unprotect(infile, outfile, aeskey_f, rsapublic_f):
    # read aeskey_f into byte buffer
@@ -76,11 +80,49 @@ def unprotect(infile, outfile, aeskey_f, rsapublic_f):
    e_audio = data[start_audio:]
    iv = e_audio[:AES.block_size]
    cipher = AES.new(aes_key, AES.MODE_CBC, iv)
-   try:
-      audio = unpad(cipher.decrypt(e_audio[AES.block_size:]), AES.block_size) #use pkcs7
-   except Exception as e:
-      print('Unable to unpad encrypted audio: %s' % (e,))
-      return 0
+   print('Chunk Decryption: '+str(DECRYPT_CHUNKS))
+   if DECRYPT_CHUNKS:
+      print('Chunk size: '+str(CHUNK_SZ))
+   if not DECRYPT_CHUNKS:
+      try:
+        audio = unpad(cipher.decrypt(e_audio[AES.block_size:]), AES.block_size) #use pkcs7
+      except Exception as e:
+        print('Unable to unpad encrypted audio: %s' % (e,))
+        return 0
+   else:
+      #try decrypting in chunks
+      e_audio = e_audio[AES.block_size:]
+      rem = len(e_audio)
+      #print('TOTAL ENCRYPTED LEN: '+str(rem))
+      nchunks = math.ceil(len(e_audio) / CHUNK_SZ)
+      audio = bytes()
+      #print('num 16KB chunks: '+str(int(nchunks)))
+      counter = 0
+      start = 0
+      for i in range(0, int(nchunks)):
+         #print('chunk #'+str(counter)+', ', end='')
+         counter = counter + 1
+         if rem < CHUNK_SZ:
+            increment = rem
+         else:
+            increment = CHUNK_SZ
+         rem = rem - increment
+         #print('rem: '+str(rem)+', ', end='')
+         #print('increment: '+str(increment)+', ', end='')
+         #print('chunk['+str(start)+','+str(start+increment-1)+'], ', end='')
+         e_chunk = e_audio[start:start+increment]
+         start = start + increment
+         cipher.iv = iv
+         #print(iv)
+         p_chunk = cipher.decrypt(e_chunk)
+         #print('len of cipher: '+str(len(e_chunk))+', ', end='')
+         #print('len of plain: '+str(len(p_chunk))+', ')
+         iv = e_chunk[(CHUNK_SZ-16):]
+         # if last chunk, unpad
+         if i == int(nchunks)-1:
+            #print('unpadding last chunk')
+            p_chunk = unpad(p_chunk, AES.block_size)
+         audio += p_chunk
 
    # wave.open outfile
    try:
