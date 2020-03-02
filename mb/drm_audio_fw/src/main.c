@@ -372,15 +372,15 @@ void play_song() {
     u32 counter = 0, rem, cp_num, cp_xfil_cnt, offset, dma_cnt, length, *fifo_fill;
 
     mb_printf("Verifying Audio File...");
-    // TODO: verify signature (authenticity/integrity) of file
+    // verify signature (authenticity/integrity) of file
     // exit if tampered or not authentic
-    //checkSignature();
+    //TODO
 
     mb_printf("Reading Audio File...");
     load_song_md();
 
-    // get WAV length
-    length = c->song.wav_size;
+    // get WAV length (minus RSA signature, song md, and AES IV)
+    length = c->song.wav_size - SIGNATURE_SZ - c->song.md.md_size - AES_BLK_SZ;
     mb_printf("Song length = %dB", length);
 
     // truncate song if locked
@@ -392,9 +392,9 @@ void play_song() {
         mb_printf("Song is unlocked. Playing full song\r\n");
     }
 
-    int firstChunk = TRUE; // whether we are operating on the first chunk of the audio; MUST reset if song is restarted!
+    int firstChunk = TRUE; // whether we are operating on the first chunk of the audio
     char iv[AES_BLK_SZ]; // use this as iv for all audio chunks after the first
-    char cipherChunk[CHUNK_SZ]; // current encrypted
+    // stack size MUST be increased to fit this (default is 1KB)
     char plainChunk[CHUNK_SZ]; // current decrypted chunk
 
     rem = length;
@@ -435,40 +435,32 @@ void play_song() {
         cp_num = (rem > CHUNK_SZ) ? CHUNK_SZ : rem;
         offset = (counter++ % 2 == 0) ? 0 : CHUNK_SZ;
 
-        /*debug*/mb_printf("setting IV");
         // if first chunk, grab the IV for decryption
-        // if not the first chunk, use the previous block as the IV
+        // if not the first chunk, use the most previous block as the IV
         if (firstChunk) {
+            firstChunk = FALSE;
             memcpy((void *)iv, (void *)(get_drm_aesiv(c->song)), AES_BLK_SZ);
         } else {
             memcpy((void *)iv, (void *)(get_drm_song(c->song) + length - rem - AES_BLK_SZ), AES_BLK_SZ);
         }
-        firstChunk = FALSE;
 
-        /*debug*/mb_printf("getting next chunk");
-        // get next chunk
-        memcpy((void *)cipherChunk, (void *)(get_drm_song(c->song) + length - rem), CHUNK_SZ);
-
-        /*debug*/mb_printf("decrypting current chunk");
-        // decrypt chunk
-        // TODO: should cipherChunk sz be cp_num or CHUNK_SZ?
-        int ret = wc_AesCbcDecryptWithKey((void*)plainChunk, (void*)cipherChunk, AES_BLK_SZ, (void*)s.aesKey, AES_KEY_SZ, (void*)iv);
+        // decrypt chunk and unpad if last chunk
+        int ret = wc_AesCbcDecryptWithKey((void*)plainChunk, (void*)(get_drm_song(c->song) + length - rem), cp_num, (void*)s.aesKey, AES_KEY_SZ, (void*)iv);
         if (ret != 0) {
-            mb_printf("Failed to decrypt chunk\r\n");
+            mb_printf("Failed to decrypt chunk: %d\r\n", ret);
             return;
         }
 
-        /*debug*/mb_printf("copying chunk into fifo");
+        // if last chunk unpad using PKCS#7
+        //TODO
+
         // do first mem cpy here into DMA BRAM
         Xil_MemCpy((void *)(XPAR_MB_DMA_AXI_BRAM_CTRL_0_S_AXI_BASEADDR + offset),
                    (void *)plainChunk,
                    (u32)(cp_num));
-
         
-
         cp_xfil_cnt = cp_num;
 
-        /*debug*/mb_printf("waiting for DMA to be ready");
         while (cp_xfil_cnt > 0) {
             // polling while loop to wait for DMA to be ready
             // DMA must run first for this to yield the proper state
