@@ -37,7 +37,7 @@ We will be cross-compiling WolfSSL for usage on the Xilinx Microblaze soft proce
 ```
 3. Run *configure*, disabling unwanted features and enabling wanted features. Notice we are creating a WolfCrypt-only build. (, see 2.3.4 at https://www.wolfssl.com/docs/wolfssl-manual/ch2/)
 ```shell
-./configure --host microblaze-xilinx-elf --enable-cryptonly --enable-harden --disable-aesgcm --disable-sha512 --disable-sha384 --disable-eccshamir --disable-ecc --disable-dh --disable-md5 --disable-sha --disable-sha224 --disable-sha3 --disable-poly1305 --disable-chacha --disable-filesystem --disable-hashdrbg --disable-examples --disable-crypttests --disable-pkcs12 --disable-rng CFLAGS="-mlittle-endian"
+./configure --host microblaze-xilinx-elf --enable-cryptonly --enable-pkcs7 --enable-rsapss --enable-harden --disable-aesgcm --disable-sha512 --disable-sha384 --disable-eccshamir --disable-ecc --disable-dh --disable-md5 --disable-sha --disable-sha224 --disable-sha3 --disable-poly1305 --disable-chacha --disable-filesystem --disable-hashdrbg --disable-examples --disable-crypttests --disable-pkcs12 --disable-rng CFLAGS="-mlittle-endian"
 ```
 
 4. If *configure* finished successfully without errors, run
