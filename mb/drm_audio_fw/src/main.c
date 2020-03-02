@@ -17,6 +17,8 @@
 #include "sleep.h"
 #include "wolfssl/wolfcrypt/hash.h"
 #include "wolfssl/wolfcrypt/sha256.h"
+#include "wolfssl/wolfcrypt/coding.h"
+#include "wolfssl/wolfcrypt/wc_encrypt.h"
 
 
 //////////////////////// GLOBALS ////////////////////////
@@ -228,8 +230,8 @@ int gen_song_md(char *buf) {
 // attempt to log in to the credentials in the shared buffer
 void login() {
     // first, copy attempted username and pin into local internal_state
-    memcpy(s.username, (void*)c->username, USERNAME_SZ);
-    memcpy(s.pin, (void*)c->pin, MAX_PIN_SZ);
+    memcpy((void*)s.username, (void*)c->username, USERNAME_SZ);
+    memcpy((void*)s.pin, (void*)c->pin, MAX_PIN_SZ);
 
     // clear shared memory
     memset((void*)c->username, 0, USERNAME_SZ);
@@ -241,14 +243,13 @@ void login() {
         // TODO: POSSIBLE TIMING ATTACK -- do we care? attacker already knows all valid usernames
         for (int i = 0; i < NUM_PROVISIONED_USERS; i++) {
             // search for matching username
-            if (!strcmp((void*)s->username, USERNAMES[PROVISIONED_UIDS[i]])) {
+            if (!strcmp((void*)s.username, USERNAMES[PROVISIONED_UIDS[i]])) {
                 // check if pin matches
-                if (!strcmp((void*)s->pin, PROVISIONED_PINS[i])) {
-                    //update states
+                if (!strcmp((void*)s.pin, PROVISIONED_PINS[i])) {
+                    //update state
                     s.logged_in = 1;
-                    c->login_status = 1;
                     s.uid = PROVISIONED_UIDS[i];
-                    mb_printf("Logged in for user '%s'\r\n", s->username);
+                    mb_printf("Logged in for user '%s'\r\n", (void *)s.username);
                     return;
                 } else {
                     break;
@@ -370,11 +371,16 @@ void share_song() {
 void play_song() {
     u32 counter = 0, rem, cp_num, cp_xfil_cnt, offset, dma_cnt, length, *fifo_fill;
 
+    mb_printf("Verifying Audio File...");
+    // verify signature (authenticity/integrity) of file
+    // exit if tampered or not authentic
+    //TODO
+
     mb_printf("Reading Audio File...");
     load_song_md();
 
-    // get WAV length
-    length = c->song.wav_size;
+    // get WAV length (minus RSA signature, song md, and AES IV)
+    length = c->song.wav_size - SIGNATURE_SZ - c->song.md.md_size - AES_BLK_SZ;
     mb_printf("Song length = %dB", length);
 
     // truncate song if locked
@@ -386,10 +392,14 @@ void play_song() {
         mb_printf("Song is unlocked. Playing full song\r\n");
     }
 
+    int firstChunk = TRUE; // whether we are operating on the first chunk of the audio
+    char iv[AES_BLK_SZ]; // use this as iv for all audio chunks after the first
+    // stack size MUST be increased to fit this (default is 1KB)
+    char plainChunk[CHUNK_SZ]; // current decrypted chunk
+
     rem = length;
     fifo_fill = (u32 *)XPAR_FIFO_COUNT_AXI_GPIO_0_BASEADDR;
 
-    // TODO: do not operate on shared mem
     // write entire file to two-block codec fifo
     // writes to one block while the other is being played
     set_playing();
@@ -414,6 +424,7 @@ void play_song() {
             case RESTART:
                 mb_printf("Restarting song... \r\n");
                 rem = length; // reset song counter
+                firstChunk = TRUE;
                 set_playing();
             default:
                 break;
@@ -424,15 +435,33 @@ void play_song() {
         cp_num = (rem > CHUNK_SZ) ? CHUNK_SZ : rem;
         offset = (counter++ % 2 == 0) ? 0 : CHUNK_SZ;
 
+        // if first chunk, grab the IV for decryption
+        // if not the first chunk, use the most previous block as the IV
+        if (firstChunk) {
+            firstChunk = FALSE;
+            memcpy((void *)iv, (void *)(get_drm_aesiv(c->song)), AES_BLK_SZ);
+        } else {
+            memcpy((void *)iv, (void *)(get_drm_song(c->song) + length - rem - AES_BLK_SZ), AES_BLK_SZ);
+        }
+
+        // decrypt chunk and unpad if last chunk
+        int ret = wc_AesCbcDecryptWithKey((void*)plainChunk, (void*)(get_drm_song(c->song) + length - rem), cp_num, (void*)s.aesKey, AES_KEY_SZ, (void*)iv);
+        if (ret != 0) {
+            mb_printf("Failed to decrypt chunk: %d\r\n", ret);
+            return;
+        }
+
+        // if last chunk unpad using PKCS#7
+        //TODO
+
         // do first mem cpy here into DMA BRAM
         Xil_MemCpy((void *)(XPAR_MB_DMA_AXI_BRAM_CTRL_0_S_AXI_BASEADDR + offset),
-                   (void *)(get_drm_song(c->song) + length - rem),
+                   (void *)plainChunk,
                    (u32)(cp_num));
-
+        
         cp_xfil_cnt = cp_num;
 
         while (cp_xfil_cnt > 0) {
-
             // polling while loop to wait for DMA to be ready
             // DMA must run first for this to yield the proper state
             // rem != length checks for first run
@@ -476,11 +505,6 @@ void digital_out() {
 
 
 int main() {
-    // WolfCrypt init
-    if (wolfCrypt_Init() != 0) {
-        mb_printf("ERROR: wolfCrypt_Init call\r\n");
-    }
-
     u32 status;
 
     init_platform();
@@ -514,6 +538,19 @@ int main() {
     memset((void*)c, 0, sizeof(cmd_channel));
 
     mb_printf("Audio DRM Module has Booted\n\r");
+
+    // WolfCrypt init
+    if (wolfCrypt_Init() != 0) {
+        mb_printf("ERROR: wolfCrypt_Init call\r\n");
+        return XST_FAILURE;
+    }
+
+    // base64 decode aes key
+    int outLen = b64AES_KEY_SZ;
+    if(Base64_Decode((void *)AES_KEY, b64AES_KEY_SZ, (void *)s.aesKey, &outLen) != 0) {
+        mb_printf("Failed to init key\r\n");
+        return XST_FAILURE;
+    }
 
     // Handle commands forever
     while(1) {
@@ -561,6 +598,7 @@ int main() {
     // WolfCrypt cleanup */
     if (wolfCrypt_Cleanup() != 0) {
         mb_printf("ERROR: wolfCrypt_Cleanup call\r\n");
+        return XST_FAILURE;
     }
     cleanup_platform();
     return 0;

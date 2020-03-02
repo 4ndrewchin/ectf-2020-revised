@@ -54,7 +54,6 @@ def main(region_names, user_names, user_secrets, region_secrets, device_dir, reg
     aes.close()
 
     # get rsa private key
-    # we don't need public key bc DRM only needs to decrypt data, not encrypt (song metadata is not encrypted)
     try:
         rsapriv_path = os.path.abspath(get_path(region_secrets_path)+'rsa_private.der')
         rsapriv = open(rsapriv_path, 'rb')
@@ -63,6 +62,16 @@ def main(region_names, user_names, user_secrets, region_secrets, device_dir, reg
         return
     rsa_privkey = rsapriv.read()
     rsapriv.close()
+
+    # get rsa public key
+    try:
+        rsapub_path = os.path.abspath(get_path(region_secrets_path)+'rsa_public.der')
+        rsapub = open(rsapub_path, 'rb')
+    except Exception as e:
+        print('Unable to open rsa_public.der file: {e}'.format(e=e))
+        return
+    rsa_pubkey = rsapub.read()
+    rsapub.close()
 
     # write secrets
     device_secrets.write(f'''
@@ -87,14 +96,19 @@ const u8 USER_IDS[] = {{ {", ".join([str(user_secrets[u]['id']) for u in user_na
 const u8 PROVISIONED_UIDS[] = {{ {", ".join(uids)} }};
 const char *PROVISIONED_PINS[] = {{ {", ".join(['"' + user_secrets[u]['pin'] + '"' for u in user_names])} }};
 
+/* BASE64 DECODE KEYS BEFORE USING */
+
 #define RSA_PRIVATE_KEY_SZ {len(rsa_privkey)}
 #define b64RSA_PRIVATE_KEY_SZ {len(b64encode(rsa_privkey))}
 const char *RSA_PRIVATE_KEY = {'"'+str(b64encode(rsa_privkey)).strip("b'")+'"'};
 
+#define RSA_PUBLIC_KEY_SZ {len(rsa_pubkey)}
+#define b64RSA_PUBLIC_KEY_SZ {len(b64encode(rsa_pubkey))}
+const char *RSA_PUBLIC_KEY = {'"'+str(b64encode(rsa_pubkey)).strip("b'")+'"'};
+
 #define AES_BLK_SZ 16
 #define AES_KEY_SZ {len(aes_key)}
 #define b64AES_KEY_SZ {len(b64encode(aes_key))}
-/* BASE64 DECODE BEFORE USING -- this has been encoded with base64 for storage purposes */
 const char *AES_KEY = {'"'+str(b64encode(aes_key)).strip("b'")+'"'};
 
 #endif // SECRETS_H
