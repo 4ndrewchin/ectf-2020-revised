@@ -5,16 +5,22 @@ Use: Once per song
 """
 import json
 import struct
+import math
 import os
 import wave
 from argparse import ArgumentParser
 import numpy as np
+from Cryptodome.Cipher import AES
+from Cryptodome.PublicKey import RSA
+from Cryptodome.Signature import pss
+from Cryptodome.Hash import SHA256
+from Cryptodome.Util.Padding import pad
 
 
 class ProtectedSong(object):
     """Example song object for protected song"""
 
-    def __init__(self, path_to_song, metadata):
+    def __init__(self, path_to_song, metadata, path_to_keys):
         """initialize values
         Args:
             path_to_song (string): file name where the song to be provisioned is stored
@@ -23,6 +29,7 @@ class ProtectedSong(object):
         self.song = path_to_song
         self.full_song, self.original_song = self.read_song(path_to_song)
         self.metadata = metadata
+        self.path_to_keys = path_to_keys
 
     def save_secured_song_to_wave(self, file_location):
         """Saves secured song to wave file assuming all the same characteristics as original song
@@ -32,11 +39,55 @@ class ProtectedSong(object):
         protected_wav.setnchannels(self.original_song.getnchannels())
         protected_wav.setsampwidth(self.original_song.getsampwidth())
         protected_wav.setframerate(self.original_song.getframerate())
+
+        # read AES 256 bit key
+        aes = open(os.path.abspath(self.path_to_keys+'aes_key'),'rb')
+        aes_key = aes.read(32)
+        aes.close()
+
+        # read RSA private key
+        rsapriv = open(os.path.abspath(self.path_to_keys+'rsa_private.der'),'rb')
+        rsa_privkey = RSA.importKey(rsapriv.read())
+        rsapriv.close()
+
+        # read RSA meta private key
+        rsaprivMeta = open(os.path.abspath(self.path_to_keys+'rsa2_private.der'),'rb')
+        rsa_privkeyMeta = RSA.importKey(rsaprivMeta.read())
+        rsaprivMeta.close()
+
+        # encrypt audio data using AES-256
+        cipher = AES.new(aes_key, AES.MODE_CBC)
+        ct_bytes = cipher.encrypt(pad(bytes(self.full_song), AES.block_size)) #use pkcs7
+        # enc_audio = cipher.iv + ct_bytes #append iv to beginning of encrypted song
+        enc_audio = ct_bytes #append iv to beginning of encrypted song
+
+        # hash [metadata + encrypted audio] and then sign
+        h = SHA256.new(self.metadata)
+        h.update(enc_audio)
+        signature = pss.new(rsa_privkey).sign(h)
+        protected_wav.writeframes(signature)
+
+        # write song metadata to file
         protected_wav.writeframes(self.metadata)
 
-        for val in self.full_song:
-            protected_wav_val = struct.pack('<h', val)
-            protected_wav.writeframesraw(protected_wav_val)
+        # IV
+        protected_wav.writeframes(cipher.iv)
+
+        # number of 16KB chucks
+        numChunks = math.ceil(len(ct_bytes) / 16000)
+
+        # total chucks and encrypted song length 
+        protected_wav.writeframes((numChunks).to_bytes(4, byteorder='little', signed=False))
+        protected_wav.writeframes(len(ct_bytes).to_bytes(4, byteorder='little', signed=False))
+
+        # write encrypted audio data to file
+        protected_wav.writeframes(enc_audio)
+
+        # storing hashes
+        for i in range(1, numChunks+1):
+            signedH = SHA256.new(ct_bytes[(i*16000)-16000:i*16000]+cipher.iv)
+            signature = pss.new(rsa_privkeyMeta).sign(signedH)
+            protected_wav.writeframes(signature)
 
         protected_wav.close()
 
@@ -70,6 +121,9 @@ def create_metadata(regions, user, user_secret_location, region_info):
     Example:
         >>create_metadata(['USA', 'Canada'], 'user1', 'user_secrets.json', {'USA': 1, 'Canada':2})
         'x06/x00/x01/x00/x01/x02'
+    Max users: 64
+    Max regions: 32
+    Max length of metadata is 1+1+1+1+32+63+1 = 100
     """
     user_secrets = json.load(open(os.path.abspath(user_secret_location)))
 
@@ -100,9 +154,25 @@ def main():
         metadata = create_metadata(args.region_list, args.owner, args.user_secrets_path, regions)
     except ValueError:
         raise ValueError('Ensure all user IDs are integers and all regions are in the provided region_information.json')
-    protected_song = ProtectedSong(args.infile, metadata)
+
+    keys_path = get_path(args.user_secrets_path)
+
+    protected_song = ProtectedSong(args.infile, metadata, keys_path)
     protected_song.save_secured_song_to_wave(args.outfile)
 
+# removes filename from path
+# Ex. './a/b/file.txt' --> './a/b/'
+#     'file.txt'       --> ''
+def get_path(full_path):
+    found = False
+    for i in range(len(full_path)-1, 0, -1):
+        if full_path[i] == '/':
+            found = True
+            break
+    dir = ''
+    if found:
+        dir = full_path[:i] + '/'
+    return dir
 
 if __name__ == '__main__':
     main()
