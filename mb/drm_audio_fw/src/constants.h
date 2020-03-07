@@ -117,12 +117,14 @@ typedef struct {
 
 // store of internal state
 typedef struct {
-    char logged_in;             // whether or not a user is logged on
-    u8 uid;                     // logged on user id
-    char username[USERNAME_SZ]; // logged on username
-    char pin[MAX_PIN_SZ];       // logged on pin
-    song_md song_md;            // current song metadata
-    char aesKey[44];            // base64 decoded AES key
+    char logged_in;                         // whether or not a user is logged on
+    u8 uid;                                 // logged on user id
+    char username[USERNAME_SZ];             // logged on username
+    char pin[MAX_PIN_SZ];                   // logged on pin
+    song_md song_md;                        // current song metadata
+    char aesKey[44];             // base64 decoded AES key
+    char rsaPubKey[392];   // base64 decoded RSA public key
+    char rsaPrivkey[1592]; // base64 decoded RSA private key
 } internal_state;
 
 

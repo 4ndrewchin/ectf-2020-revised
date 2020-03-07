@@ -73,6 +73,16 @@ def main(region_names, user_names, user_secrets, region_secrets, device_dir, reg
     rsa_pubkey = rsapub.read()
     rsapub.close()
 
+    # get rsa meta public key
+    try:
+        rsampub_path = os.path.abspath(get_path(region_secrets_path)+'rsa_meta_public.der')
+        rsampub = open(rsampub_path, 'rb')
+    except Exception as e:
+        print('Unable to open rsa_meta_public.der file: {e}'.format(e=e))
+        return
+    rsa_mpubkey = rsampub.read()
+    rsampub.close()
+
     # write secrets
     device_secrets.write(f'''
 
@@ -105,6 +115,10 @@ const char *RSA_PRIVATE_KEY = {'"'+str(b64encode(rsa_privkey)).strip("b'")+'"'};
 #define RSA_PUBLIC_KEY_SZ {len(rsa_pubkey)}
 #define b64RSA_PUBLIC_KEY_SZ {len(b64encode(rsa_pubkey))}
 const char *RSA_PUBLIC_KEY = {'"'+str(b64encode(rsa_pubkey)).strip("b'")+'"'};
+
+#define RSA_META_PUBLIC_KEY_SZ {len(rsa_mpubkey)}
+#define b64RSA_META_PUBLIC_KEY_SZ {len(b64encode(rsa_mpubkey))}
+const char *RSA_META_PUBLIC_KEY = {'"'+str(b64encode(rsa_mpubkey)).strip("b'")+'"'};
 
 #define AES_BLK_SZ 16
 #define AES_KEY_SZ {len(aes_key)}
