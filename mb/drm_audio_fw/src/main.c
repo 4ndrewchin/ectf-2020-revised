@@ -15,10 +15,12 @@
 #include "xintc.h"
 #include "constants.h"
 #include "sleep.h"
-#include "wolfssl/wolfcrypt/hash.h"
-#include "wolfssl/wolfcrypt/sha256.h"
-#include "wolfssl/wolfcrypt/coding.h"
-#include "wolfssl/wolfcrypt/wc_encrypt.h"
+//#include "wolfssl/wolfcrypt/hash.h"
+//#include "wolfssl/wolfcrypt/sha256.h"
+//#include "wolfssl/wolfcrypt/coding.h"
+//#include "wolfssl/wolfcrypt/wc_encrypt.h"
+//#include "wolfssl/wolfcrypt/rsa.h"
+#include "tomcrypt/tomcrypt.h"
 
 
 //////////////////////// GLOBALS ////////////////////////
@@ -369,23 +371,59 @@ void share_song() {
 
 // plays a song and looks for play-time commands
 void play_song() {
-    u32 counter = 0, rem, cp_num, cp_xfil_cnt, offset, dma_cnt, length, *fifo_fill;
+    u32 counter = 0, rem, cp_num, cp_xfil_cnt, offset, dma_cnt, lenAudio, *fifo_fill, length;
+    int ret = -1;
+    //char signature[SIGNATURE_SZ];
+    //char decSig[SIGNATURE_SZ]; // decrypted signature
+    //char hash[SIGNATURE_SZ];
 
-    mb_printf("Verifying Audio File...");
-    // verify signature (authenticity/integrity) of file
-    // exit if tampered or not authentic
-    //TODO
+    //RsaKey rsa;
+    //mb_printf("rsa key size: %d", sizeof(RsaKey)); // only 152 bytes??
+    /*ret = wc_InitRsaKey(&rsa, NULL); // not using heap hint. No custom memory
+    if (ret != 0) {
+        mb_printf("Operation failed REMOVE INITRSA");
+        return;
+    }
+    et = wc_RsaPublicKeyDecode((void*)s.rsaPubKey, 0, &rsa, b64RSA_PUBLIC_KEY_SZ);
+    if (ret != 0) {
+        mb_printf("Operation failed REMOVE DECODE");
+        return;
+    }*/
 
     mb_printf("Reading Audio File...");
     load_song_md();
 
-    // get WAV length (minus RSA signature, song md, and AES IV)
-    length = c->song.wav_size - SIGNATURE_SZ - c->song.md.md_size - AES_BLK_SZ;
-    mb_printf("Song length = %dB", length);
+    // WAV size is size of all data following the WAV metadata
+    length = c->song.wav_size - SIGNATURE_SZ;
+    lenAudio = c->song.wav_size - SIGNATURE_SZ - c->song.md.md_size - AES_BLK_SZ;
+
+    mb_printf("Verifying Audio File...");
+    // verify signature (authenticity/integrity) of file
+    /*memcpy((void*)signature, (void*)(c->song.signature), SIGNATURE_SZ);
+    ret = wc_Sha256Hash((byte*)(&c->song.md), length, (byte*)hash);
+    if (ret != 0) {
+        mb_printf("Operation failed REMOVE HASH");
+        return;
+    }
+    ret = wc_RsaPSS_Verify((byte*)signature, (word32)SIGNATURE_SZ, (byte*)decSig, (word32)SIGNATURE_SZ, WC_HASH_TYPE_SHA256, WC_MGF1SHA256, &rsa);
+    if (ret < 0) {
+        mb_printf("Operation failed REMOVE VERIFY");
+        return;
+    }
+    if (memcmp(hash, decSig, SIGNATURE_SZ) != 0) {
+        mb_printf("Operation failed");
+        return;
+    }
+    mb_printf("Successfully Verified Audio File");*/
+
+    // calculate total number of chunks to decrypt
+    mb_printf("Song length = %dB", lenAudio);
+    int nchunks = ((lenAudio % CHUNK_SZ) == 0) ? (lenAudio / CHUNK_SZ) : ((lenAudio / CHUNK_SZ)+1);
+    mb_printf("# chunks: %d", nchunks);
 
     // truncate song if locked
-    if (length > PREVIEW_SZ && is_locked()) {
-        length = PREVIEW_SZ;
+    if (lenAudio > PREVIEW_SZ && is_locked()) {
+        lenAudio = PREVIEW_SZ;
         mb_printf("Song is locked.  Playing only %ds = %dB\r\n",
                    PREVIEW_TIME_SEC, PREVIEW_SZ);
     } else {
@@ -397,7 +435,7 @@ void play_song() {
     // stack size MUST be increased to fit this (default is 1KB)
     char plainChunk[CHUNK_SZ]; // current decrypted chunk
 
-    rem = length;
+    rem = lenAudio;
     fifo_fill = (u32 *)XPAR_FIFO_COUNT_AXI_GPIO_0_BASEADDR;
 
     // write entire file to two-block codec fifo
@@ -423,7 +461,7 @@ void play_song() {
                 return;
             case RESTART:
                 mb_printf("Restarting song... \r\n");
-                rem = length; // reset song counter
+                rem = lenAudio; // reset song counter
                 firstChunk = TRUE;
                 set_playing();
             default:
@@ -436,27 +474,30 @@ void play_song() {
         offset = (counter++ % 2 == 0) ? 0 : CHUNK_SZ;
 
         // if first chunk, grab the IV for decryption
-        // if not the first chunk, use the most previous block as the IV
+        // if not the first chunk, use the most previous block as te IV
         if (firstChunk) {
             firstChunk = FALSE;
-            memcpy((void *)iv, (void *)(get_drm_aesiv(c->song)), AES_BLK_SZ);
+            memcpy(iv, (void *)(get_drm_aesiv(c->song)), AES_BLK_SZ);
         } else {
-            memcpy((void *)iv, (void *)(get_drm_song(c->song) + length - rem - AES_BLK_SZ), AES_BLK_SZ);
+            memcpy(iv, (void *)(get_drm_song(c->song) + lenAudio - rem - AES_BLK_SZ), AES_BLK_SZ);
         }
 
         // decrypt chunk and unpad if last chunk
-        int ret = wc_AesCbcDecryptWithKey((void*)plainChunk, (void*)(get_drm_song(c->song) + length - rem), cp_num, (void*)s.aesKey, AES_KEY_SZ, (void*)iv);
+        /*ret = wc_AesCbcDecryptWithKey((byte*)plainChunk, (void*)(get_drm_song(c->song) + lenAudio - rem), cp_num, (byte*)s.aesKey, (word32)AES_KEY_SZ, (byte*)iv);
         if (ret != 0) {
-            mb_printf("Failed to decrypt chunk: %d\r\n", ret);
+            mb_printf("Operation failed REMOVE DECRYPT");
             return;
-        }
+        }*/
 
         // if last chunk unpad using PKCS#7
-        //TODO
+        if (counter == nchunks) {
+            // TODO
+            //mb_printf("last block: %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", (void*)plainChunk[7200], (void*)plainChunk[7201], (void*)plainChunk[7202], (void*)plainChunk[7203], (void*)plainChunk[7204], (void*)plainChunk[7205], (void*)plainChunk[7206], (void*)plainChunk[7207], (void*)plainChunk[7208], (void*)plainChunk[7209], (void*)plainChunk[7210], (void*)plainChunk[7211], (void*)plainChunk[7212], (void*)plainChunk[7213], (void*)plainChunk[7214], (void*)plainChunk[7215]);
+        }
 
         // do first mem cpy here into DMA BRAM
         Xil_MemCpy((void *)(XPAR_MB_DMA_AXI_BRAM_CTRL_0_S_AXI_BASEADDR + offset),
-                   (void *)plainChunk,
+                   (void*)plainChunk,
                    (u32)(cp_num));
         
         cp_xfil_cnt = cp_num;
@@ -464,9 +505,9 @@ void play_song() {
         while (cp_xfil_cnt > 0) {
             // polling while loop to wait for DMA to be ready
             // DMA must run first for this to yield the proper state
-            // rem != length checks for first run
+            // rem != lenAudio checks for first run
             while (XAxiDma_Busy(&sAxiDma, XAXIDMA_DMA_TO_DEVICE)
-                   && rem != length && *fifo_fill < (FIFO_CAP - 32));
+                   && rem != lenAudio && *fifo_fill < (FIFO_CAP - 32));
 
             // do DMA
             dma_cnt = (FIFO_CAP - *fifo_fill > cp_xfil_cnt)
@@ -540,17 +581,32 @@ int main() {
     mb_printf("Audio DRM Module has Booted\n\r");
 
     // WolfCrypt init
-    if (wolfCrypt_Init() != 0) {
+    /*if (wolfCrypt_Init() != 0) {
         mb_printf("ERROR: wolfCrypt_Init call\r\n");
         return XST_FAILURE;
-    }
+    }*/
 
-    // base64 decode aes key
-    int outLen = b64AES_KEY_SZ;
-    if(Base64_Decode((void *)AES_KEY, b64AES_KEY_SZ, (void *)s.aesKey, &outLen) != 0) {
+    // base64 decode crypto keys for later use
+    unsigned long outLen = AES_KEY_SZ;
+    if (base64_decode((void *)AES_KEY, b64AES_KEY_SZ, (void *)s.aesKey, &outLen) != CRYPT_OK) {
+        mb_printf("Failed to init key\r\n");
+        return CRYPT_OK;
+    } 
+    /*word32 outLen = b64AES_KEY_SZ;
+    if(Base64_Decode((void *)AES_KEY, (word32)b64AES_KEY_SZ, (void *)s.aesKey, &outLen) != 0) {
         mb_printf("Failed to init key\r\n");
         return XST_FAILURE;
     }
+    outLen = b64RSA_PUBLIC_KEY_SZ;
+    if(Base64_Decode((void *)RSA_PUBLIC_KEY, (word32)b64RSA_PUBLIC_KEY_SZ, (void *)s.rsaPubKey, &outLen) != 0) {
+        mb_printf("Failed to init key\r\n");
+        return XST_FAILURE;
+    }
+    outLen = b64RSA_PRIVATE_KEY_SZ;
+    if(Base64_Decode((void *)RSA_PRIVATE_KEY, (word32)b64RSA_PRIVATE_KEY_SZ, (void *)s.rsaPrivkey, &outLen) != 0) {
+        mb_printf("Failed to init key\r\n");
+        return XST_FAILURE;
+    }*/
 
     // Handle commands forever
     while(1) {
@@ -596,10 +652,10 @@ int main() {
     }
 
     // WolfCrypt cleanup */
-    if (wolfCrypt_Cleanup() != 0) {
+    /*if (wolfCrypt_Cleanup() != 0) {
         mb_printf("ERROR: wolfCrypt_Cleanup call\r\n");
         return XST_FAILURE;
-    }
+    }*/
     cleanup_platform();
     return 0;
 }
