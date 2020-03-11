@@ -5,6 +5,7 @@ Use: Once per song
 """
 import json
 import struct
+import math
 import os
 import wave
 from argparse import ArgumentParser
@@ -49,10 +50,16 @@ class ProtectedSong(object):
         rsa_privkey = RSA.importKey(rsapriv.read())
         rsapriv.close()
 
+        # read RSA meta private key
+        rsaprivMeta = open(os.path.abspath(self.path_to_keys+'rsa2_private.der'),'rb')
+        rsa_privkeyMeta = RSA.importKey(rsaprivMeta.read())
+        rsaprivMeta.close()
+
         # encrypt audio data using AES-256
         cipher = AES.new(aes_key, AES.MODE_CBC)
         ct_bytes = cipher.encrypt(pad(bytes(self.full_song), AES.block_size)) #use pkcs7
-        enc_audio = cipher.iv + ct_bytes #append iv to beginning of encrypted song
+        # enc_audio = cipher.iv + ct_bytes #append iv to beginning of encrypted song
+        enc_audio = ct_bytes #append iv to beginning of encrypted song
 
         # hash [metadata + encrypted audio] and then sign
         h = SHA256.new(self.metadata)
@@ -63,8 +70,24 @@ class ProtectedSong(object):
         # write song metadata to file
         protected_wav.writeframes(self.metadata)
 
+        # IV
+        protected_wav.writeframes(cipher.iv)
+
+        # number of 16KB chucks
+        numChunks = math.ceil(len(ct_bytes) / 16000)
+
+        # total chucks and encrypted song length 
+        protected_wav.writeframes((numChunks).to_bytes(4, byteorder='little', signed=False))
+        protected_wav.writeframes(len(ct_bytes).to_bytes(4, byteorder='little', signed=False))
+
         # write encrypted audio data to file
         protected_wav.writeframes(enc_audio)
+
+        # storing hashes
+        for i in range(1, numChunks+1):
+            signedH = SHA256.new(ct_bytes[(i*16000)-16000:i*16000]+cipher.iv)
+            signature = pss.new(rsa_privkeyMeta).sign(signedH)
+            protected_wav.writeframes(signature)
 
         protected_wav.close()
 
@@ -152,4 +175,4 @@ def get_path(full_path):
     return dir
 
 if __name__ == '__main__':
-    main()
+main()
