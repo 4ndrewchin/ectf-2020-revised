@@ -5,6 +5,7 @@ Use: Once per ecosystem of devices
 """
 import json
 import os
+import sys
 from argparse import ArgumentParser
 from Cryptodome.PublicKey import RSA
 from Cryptodome.Cipher import AES
@@ -23,43 +24,47 @@ def main(region_dict, file_name):
     dir = get_path(file_name)
 
     print("generating cryptographic keys")
-    # RSA
-    rsa_key = RSA.generate(2048)
-    try:
-        rsa_public = open(os.path.abspath(dir+'rsa_public.der'), 'wb')
-    except Exception as e:
-        print("Unable to open rsa public key file: %s" % (e,))
-        return 0
-    try:
-        rsa_public.write(rsa_key.publickey().exportKey('DER'))
-    except Exception as e:
-        print("Failed to write to rsa public key file: %s" % (e,))
-        return 0
-    rsa_public.close()
 
+    # Key for metadata and song
+    key1 = get_random_bytes(32)
     try:
-        rsa_private = open(os.path.abspath(dir+'rsa_private.der'), 'wb')
+        hmacKey1 = open(os.path.abspath(dir+'key1.der'), 'wb')
+        try:
+            hmacKey1.write(key1)
+        except Exception as e:
+            print("Failed to write to key1 file: %s" % (e,))
+            sys.exit(e)
     except Exception as e:
-        print("Unable to open rsa private key file: %s" % (e,))
-        return 0
+        print("Unable to open hmac key1 file: %s" % (e,))
+        sys.exit(e)
+
+    hmacKey1.close()
+
+    # Key for hashes
+    key2 = get_random_bytes(32)
     try:
-        rsa_private.write(rsa_key.exportKey('DER'))
+        hmacKey2 = open(os.path.abspath(dir+'key2.der'), 'wb')
+        try:
+            hmacKey2.write(key2)
+        except Exception as e:
+            print("Failed to write to key2 file: %s" % (e,))
+            sys.exit(e)
     except Exception as e:
-        print("Failed to write to rsa private key file: %s" % (e,))
-        return 0
-    rsa_private.close()
+        print("Unable to open hmac key2 file: %s" % (e,))
+        sys.exit(e)
+    hmacKey2.close()
 
     #AES
     try:
         aes = open(os.path.abspath(dir+"aes_key"), "wb")
     except Exception as e:
         print("Unable to open aes_key file: %s" % (e,))
-        return 0
+        sys.exit(e)
     try:
         aes.write(get_random_bytes(32)) # 256-bit key
     except Exception as e:
         print("Unable to write to aes_key file: %s" % (e,))
-        return 0
+        sys.exit(e)
     aes.close()
 
 # removes filename from path
