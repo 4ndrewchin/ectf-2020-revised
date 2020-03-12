@@ -19,6 +19,7 @@
 #include "wolfssl/wolfcrypt/sha256.h"
 #include "wolfssl/wolfcrypt/coding.h"
 #include "wolfssl/wolfcrypt/wc_encrypt.h"
+#include "wolfssl/wolfcrypt/hmac.h"
 
 
 //////////////////////// GLOBALS ////////////////////////
@@ -55,7 +56,6 @@ internal_state s;
 volatile static int InterruptProcessed = FALSE;
 static XIntc InterruptController;
 
-// TODO: UNDERSTAND THIS
 void myISR(void) {
     InterruptProcessed = TRUE;
 }
@@ -223,6 +223,48 @@ int gen_song_md(char *buf) {
 }
 
 
+// takes the base64 encoded cryptographic keys from the secrets header and
+// decodes them for use
+// copy decoded keys into local internal state
+// return 0 on success
+int initCryptoKeys() {
+    word32 outLen = b64AES_KEY_SZ;
+    if (Base64_Decode((void *)AES_KEY, (word32)b64AES_KEY_SZ, (void *)s.aesKey, &outLen) != 0) {
+        return -1;
+    }
+    outLen = b64AES_KEY_SZ;
+    if (Base64_Decode((void *)HMAC_MD_KEY, (word32)b64HMAC_MD_KEY_SZ, (void *)s.hmacMdKey, &outLen) != 0) {
+        return -1;
+    }
+    outLen = b64AES_KEY_SZ;
+    if (Base64_Decode((void *)HMAC_KEY, (word32)b64HMAC_KEY_SZ, (void *)s.hmacKey, &outLen) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+/* create HMAC using data and key and compare to DRM HMAC
+ * return 0 on success, -1 otherwise
+ *
+ * hmac    : Hmac object
+ * data    : data to create HMAC with
+ * dataLen : length of data in bytes
+ * hash    : buffer to store hash of data
+ * drmHmac : HMAC to compare computed HMAC to
+ */
+int verifyHmac(Hmac *hmac, char* data, int dataLen, char* hash, char* drmHmac) {
+    if (wc_HmacUpdate(hmac, (void *)data, dataLen) != 0) {
+        return -1;
+    }
+    if (wc_HmacFinal(hmac, hash) != 0) {
+        return -1;
+    }
+    if (memcmp(hash, (void *)drmHmac, SIGNATURE_SZ) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
 
 //////////////////////// COMMAND FUNCTIONS ////////////////////////
 
@@ -240,7 +282,6 @@ void login() {
     if (s.logged_in) {
         mb_printf("Already logged in. Please log out first.\r\n");
     } else {
-        // TODO: POSSIBLE TIMING ATTACK -- do we care? attacker already knows all valid usernames
         for (int i = 0; i < NUM_PROVISIONED_USERS; i++) {
             // search for matching username
             if (!strcmp((void*)s.username, USERNAMES[PROVISIONED_UIDS[i]])) {
@@ -345,10 +386,13 @@ void share_song() {
         mb_printf("Username not found\r\n");
         c->song.wav_size = 0;
         return;
+    } else if (s.song_md.num_users >= MAX_USERS) {
+        mb_printf("Cannot share song\r\n");
+        c->song.wav_size = 0;
+        return;
     }
-
+    
     // generate new song metadata
-    // TODO: INTEGER OVERFLOW HERE
     s.song_md.uids[s.song_md.num_users++] = uid;
     new_md_len = gen_song_md(new_md);
     shift = new_md_len - s.song_md.md_size;
@@ -369,23 +413,39 @@ void share_song() {
 
 // plays a song and looks for play-time commands
 void play_song() {
-    u32 counter = 0, rem, cp_num, cp_xfil_cnt, offset, dma_cnt, length, *fifo_fill;
+    u32 counter = 0, rem, cp_num, cp_xfil_cnt, offset, dma_cnt, lenAudio, *fifo_fill, length;
+    int ret = -1;
+    char hash[SIGNATURE_SZ];
+    Hmac hmac;
 
-    mb_printf("Verifying Audio File...");
-    // verify signature (authenticity/integrity) of file
-    // exit if tampered or not authentic
-    //TODO
+    // use HMAC metadata key for verifying metadata (and rest of data)
+    if (wc_HmacSetKey(&hmac, SHA256, s.hmacMdKey, HMAC_MD_KEY_SZ) != 0) {
+        mb_printf("Operation failed REMOVE->HMACSETKEY");
+        return;
+    }
 
     mb_printf("Reading Audio File...");
     load_song_md();
 
-    // get WAV length (minus RSA signature, song md, and AES IV)
-    length = c->song.wav_size - SIGNATURE_SZ - c->song.md.md_size - AES_BLK_SZ;
-    mb_printf("Song length = %dB", length);
+    // WAV size is size of all data following the WAV metadata
+    length = c->song.wav_size - SIGNATURE_SZ;
+    lenAudio = c->song.wav_size - SIGNATURE_SZ - c->song.md.md_size - AES_BLK_SZ;
+
+    mb_printf("Verifying Audio File...");
+    if (verifyHmac(&hmac, /*drm except wav md and hmac*/, /*datalen*/, hash, /*get_drm_hmac*/) != 0) {
+        mb_printf("Failed to play audio");
+        return;
+    }
+    mb_printf("Successfully Verified Audio File");
+
+    // calculate total number of chunks to decrypt
+    mb_printf("Song length = %dB", lenAudio);
+    int nchunks = ((lenAudio % CHUNK_SZ) == 0) ? (lenAudio / CHUNK_SZ) : ((lenAudio / CHUNK_SZ)+1);
+    mb_printf("# chunks: %d", nchunks);
 
     // truncate song if locked
-    if (length > PREVIEW_SZ && is_locked()) {
-        length = PREVIEW_SZ;
+    if (lenAudio > PREVIEW_SZ && is_locked()) {
+        lenAudio = PREVIEW_SZ;
         mb_printf("Song is locked.  Playing only %ds = %dB\r\n",
                    PREVIEW_TIME_SEC, PREVIEW_SZ);
     } else {
@@ -397,7 +457,13 @@ void play_song() {
     // stack size MUST be increased to fit this (default is 1KB)
     char plainChunk[CHUNK_SZ]; // current decrypted chunk
 
-    rem = length;
+    // use HMAC key for verifying audio chunks
+    if (wc_HmacSetKey(&hmac, SHA256, s.hmacKey, HMAC_KEY_SZ) != 0) {
+        mb_printf("Operation failed REMOVE->HMACSETKEY");
+        return;
+    }
+
+    rem = lenAudio;
     fifo_fill = (u32 *)XPAR_FIFO_COUNT_AXI_GPIO_0_BASEADDR;
 
     // write entire file to two-block codec fifo
@@ -423,7 +489,7 @@ void play_song() {
                 return;
             case RESTART:
                 mb_printf("Restarting song... \r\n");
-                rem = length; // reset song counter
+                rem = lenAudio; // reset song counter
                 firstChunk = TRUE;
                 set_playing();
             default:
@@ -436,27 +502,36 @@ void play_song() {
         offset = (counter++ % 2 == 0) ? 0 : CHUNK_SZ;
 
         // if first chunk, grab the IV for decryption
-        // if not the first chunk, use the most previous block as the IV
+        // if not the first chunk, use the most previous block as te IV
         if (firstChunk) {
             firstChunk = FALSE;
-            memcpy((void *)iv, (void *)(get_drm_aesiv(c->song)), AES_BLK_SZ);
+            memcpy(iv, (void *)(get_drm_aesiv(c->song)), AES_BLK_SZ);
         } else {
-            memcpy((void *)iv, (void *)(get_drm_song(c->song) + length - rem - AES_BLK_SZ), AES_BLK_SZ);
+            memcpy(iv, (void *)(get_drm_song(c->song) + lenAudio - rem - AES_BLK_SZ), AES_BLK_SZ);
         }
 
-        // decrypt chunk and unpad if last chunk
-        int ret = wc_AesCbcDecryptWithKey((void*)plainChunk, (void*)(get_drm_song(c->song) + length - rem), cp_num, (void*)s.aesKey, AES_KEY_SZ, (void*)iv);
+        // verify chunk using HMAC
+        if (verifyHmac(&hmac, (char*)(get_drm_song(c->song) + lenAudio - rem), cp_num, hash, /*get_drm_hmac*/) != 0) {
+            mb_printf("Failed to play audio");
+            return;
+        }
+
+        // decrypt chunk
+        ret = wc_AesCbcDecryptWithKey((byte*)plainChunk, (void*)(get_drm_song(c->song) + lenAudio - rem), cp_num, (byte*)s.aesKey, (word32)AES_KEY_SZ, (byte*)iv);
         if (ret != 0) {
-            mb_printf("Failed to decrypt chunk: %d\r\n", ret);
+            mb_printf("Operation failed REMOVE DECRYPT");
             return;
         }
 
         // if last chunk unpad using PKCS#7
-        //TODO
+        if (counter == nchunks) {
+            // TODO
+            //mb_printf("last block: %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", (void*)plainChunk[7200], (void*)plainChunk[7201], (void*)plainChunk[7202], (void*)plainChunk[7203], (void*)plainChunk[7204], (void*)plainChunk[7205], (void*)plainChunk[7206], (void*)plainChunk[7207], (void*)plainChunk[7208], (void*)plainChunk[7209], (void*)plainChunk[7210], (void*)plainChunk[7211], (void*)plainChunk[7212], (void*)plainChunk[7213], (void*)plainChunk[7214], (void*)plainChunk[7215]);
+        }
 
         // do first mem cpy here into DMA BRAM
         Xil_MemCpy((void *)(XPAR_MB_DMA_AXI_BRAM_CTRL_0_S_AXI_BASEADDR + offset),
-                   (void *)plainChunk,
+                   (void*)plainChunk,
                    (u32)(cp_num));
         
         cp_xfil_cnt = cp_num;
@@ -464,9 +539,9 @@ void play_song() {
         while (cp_xfil_cnt > 0) {
             // polling while loop to wait for DMA to be ready
             // DMA must run first for this to yield the proper state
-            // rem != length checks for first run
+            // rem != lenAudio checks for first run
             while (XAxiDma_Busy(&sAxiDma, XAXIDMA_DMA_TO_DEVICE)
-                   && rem != length && *fifo_fill < (FIFO_CAP - 32));
+                   && rem != lenAudio && *fifo_fill < (FIFO_CAP - 32));
 
             // do DMA
             dma_cnt = (FIFO_CAP - *fifo_fill > cp_xfil_cnt)
@@ -541,14 +616,13 @@ int main() {
 
     // WolfCrypt init
     if (wolfCrypt_Init() != 0) {
-        mb_printf("ERROR: wolfCrypt_Init call\r\n");
+        mb_printf("Error in wolfCrypt_Init\r\n");
         return XST_FAILURE;
     }
 
-    // base64 decode aes key
-    int outLen = b64AES_KEY_SZ;
-    if(Base64_Decode((void *)AES_KEY, b64AES_KEY_SZ, (void *)s.aesKey, &outLen) != 0) {
-        mb_printf("Failed to init key\r\n");
+    // initialize crypto keys
+    if (initCryptoKeys() != 0) {
+        mb_printf("Error initializing keys\r\n");
         return XST_FAILURE;
     }
 
@@ -597,7 +671,7 @@ int main() {
 
     // WolfCrypt cleanup */
     if (wolfCrypt_Cleanup() != 0) {
-        mb_printf("ERROR: wolfCrypt_Cleanup call\r\n");
+        mb_printf("Error in wolfCrypt_Cleanup\r\n");
         return XST_FAILURE;
     }
     cleanup_platform();

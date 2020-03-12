@@ -28,7 +28,7 @@
 #define MAX_USERS 64
 #define USERNAME_SZ 64
 #define MAX_PIN_SZ 64
-#define MAX_SONG_SZ (1<<25) // support 128 MB songs
+#define MAX_SONG_SZ (1<<27) // support 128 MB songs
 #define SIGNATURE_SZ 256
 
 
@@ -117,12 +117,14 @@ typedef struct {
 
 // store of internal state
 typedef struct {
-    char logged_in;             // whether or not a user is logged on
-    u8 uid;                     // logged on user id
-    char username[USERNAME_SZ]; // logged on username
-    char pin[MAX_PIN_SZ];       // logged on pin
-    song_md song_md;            // current song metadata
-    char aesKey[44];            // base64 decoded AES key
+    char logged_in;                         // whether or not a user is logged on
+    u8 uid;                                 // logged on user id
+    char username[USERNAME_SZ];             // logged on username
+    char pin[MAX_PIN_SZ];                   // logged on pin
+    song_md song_md;                        // current song metadata
+    char aesKey[44];                        // base64 decoded AES key
+    char hmacKey[44];                       // base64 decoded HMAC key
+    char hmacMdKey[44];                     // base64 decoded HMAC metadata key
 } internal_state;
 
 

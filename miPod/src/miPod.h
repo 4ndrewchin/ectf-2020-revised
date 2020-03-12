@@ -18,7 +18,7 @@
 #define MAX_USERS 64
 #define USERNAME_SZ 64
 #define MAX_PIN_SZ 64
-#define MAX_SONG_SZ (1<<25) // support 128 MB songs
+#define MAX_SONG_SZ (1<<27) // support 128 MB songs
 #define SIGNATURE_SZ 256
 
 // printing utility
