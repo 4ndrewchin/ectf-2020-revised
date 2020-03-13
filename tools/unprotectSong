@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""
+Description: Unprotects song by removing signature, metadata, and decrypting audio
+Use: Once per encrypted song
+"""
+
+import os
+import wave
+import math
+import struct
+import numpy as np
+from argparse import ArgumentParser
+from Cryptodome.Cipher import AES
+from Cryptodome.Hash import SHA256, HMAC
+from Cryptodome.PublicKey import RSA
+from Cryptodome.Signature import pss
+from Cryptodome.Util.Padding import unpad
+
+DECRYPT_CHUNKS = True
+CHUNK_SZ = 16000
+
+def unprotect(infile, outfile, aeskey_f, hmacKey1File):
+   # read aeskey_f into byte buffer
+   try:
+      aes = open(os.path.abspath(aeskey_f), 'rb')
+   except Exception as e:
+      print('Unable to open aes_key file: %s' % (e,))
+      return 0
+   aes_key = aes.read(32) #256/8
+   aes.close()
+
+   #read hmacKey1 into buffer
+   try:
+      hmacKey1Fd = open(os.path.abspath(hmacKey1File), 'rb')
+   except Exception as e:
+      print('Unable to open rsa_public.der file: %s' % (e,))
+      return 0
+   hmacKey1 = hmacKey1Fd.read()
+   hmacKey1Fd.close()
+
+   # wave.open infile
+   try:
+      protected = wave.open(os.path.abspath(infile), 'rb')
+   except Exception as e:
+      print('Unable to open infile: %s' % (e,))
+      return 0
+
+   # save wav metadata using getnchannels, getsampwidth, getframerate
+   nchannels = protected.getnchannels()
+   sampwidth = protected.getsampwidth()
+   framerate = protected.getframerate()
+
+   # read data and close infile
+   nframes = protected.getnframes()
+   data = np.frombuffer(protected.readframes(nframes), dtype=np.int16)
+   data = data.tobytes()
+   protected.close()
+   print(len(data))
+   signature_len = 32 
+   meta_data_bytes = 4 
+   start_meta_data =  signature_len + meta_data_bytes
+
+   # get signature with first 256
+   signature = data[:signature_len]
+
+   # get length of meta data
+   meta_data_len = data[signature_len:start_meta_data]
+   int_meta_data_len = int.from_bytes(meta_data_len, byteorder='big', signed=False)
+
+   # get meta data
+   end_meta_data = start_meta_data+int_meta_data_len
+   meta_data = data[start_meta_data:start_meta_data+int_meta_data_len]
+
+   # get iv
+   end_iv = end_meta_data + 16
+   iv = data[end_meta_data:end_iv]
+   
+   # get the number of 16000 chunks and audio length in bytes
+   numChunks = data[end_iv:end_iv+4]
+   audio_length = data[end_iv+4:end_iv+8]
+   intAudioLength = int.from_bytes(audio_length, byteorder='big', signed=False)
+   # get the encrypted AES audio
+   enc_audio = data[end_iv+8:end_iv+8+intAudioLength]
+   # get all hashes of each block
+   block_hashes = data[end_iv+8+intAudioLength:]
+   print(int(len(block_hashes)/32))
+   # recompute the hash of meta data and encrypted song
+   verifier = HMAC.new(hmacKey1, meta_data, digestmod=SHA256) 
+   verifier = verifier.update(enc_audio) 
+
+   print('Verifying signature...', end='')
+   try:
+      verifier.verify(signature)
+   except Exception as e:
+      print('error: %s' % (e,))
+      return 0
+   print('success')
+
+   # print("first 10 bytes of encrypted audio")
+   # print(enc_audio[:10])
+   # return 0
+
+   # decrypt audio using AES key
+   md_size = meta_data[0] #first byte of song metadata is length
+   if md_size > 100:
+      print('Something is wrong. Metadata max size is 100, got %s' % md_size)
+      return 0
+   cipher = AES.new(aes_key, AES.MODE_CBC, iv)
+   print('Chunk Decryption: '+str(DECRYPT_CHUNKS))
+   if DECRYPT_CHUNKS:
+      print('Chunk size: '+str(CHUNK_SZ))
+   if not DECRYPT_CHUNKS:
+      try:
+        audio = unpad(cipher.decrypt(enc_audio[AES.block_size:]), AES.block_size) #use pkcs7
+      except Exception as e:
+        print('Unable to unpad encrypted audio: %s' % (e,))
+        return 0
+   else:
+      #try decrypting in chunks
+      # print(len(enc_audio))
+      # enc_audio = enc_audio[AES.block_size:]
+      # print(AES.block_size)
+      rem = len(enc_audio)
+      print('TOTAL ENCRYPTED LEN: '+str(rem))
+      nchunks = math.ceil(len(enc_audio) / CHUNK_SZ)
+      audio = bytes()
+      print('num 16KB chunks: '+str(int(nchunks)))
+      counter = 0
+      start = 0
+      for i in range(0, int(nchunks)):
+         # print('chunk #'+str(counter)+', ', end='')
+         counter = counter + 1
+         if rem < CHUNK_SZ:
+            increment = rem
+         else:
+            increment = CHUNK_SZ
+         rem = rem - increment
+         #print('rem: '+str(rem)+', ', end='')
+         #print('increment: '+str(increment)+', ', end='')
+         #print('chunk['+str(start)+','+str(start+increment-1)+'], ', end='')
+         e_chunk = enc_audio[start:start+increment]
+         start = start + increment
+         cipher.iv = iv
+         # print(len(e_chunk))
+         h = HMAC.new(hmacKey1, e_chunk+iv, digestmod=SHA256)
+         # print(block_hashes[i*32:32+i*32])
+         if i == 0:
+            print("cipher IV")
+            print(iv)
+            print("first 10 bytes of encrypted song")
+            print(e_chunk[:10])
+            print("first hash value")
+            print(h.digest())
+
+         # h.verify(block_hashes[i*32:32+i*32])
+         #print(iv)
+         p_chunk = cipher.decrypt(e_chunk)
+         #print('len of cipher: '+str(len(e_chunk))+', ', end='')
+         #print('len of plain: '+str(len(p_chunk))+', ')
+         iv = e_chunk[(CHUNK_SZ-16):]
+         # if last chunk, unpad
+         if i == int(nchunks)-1:
+            #print('unpadding last chunk')
+            p_chunk = unpad(p_chunk, AES.block_size)
+         audio += p_chunk
+
+   # wave.open outfile
+   try:
+      unprotected = wave.open(os.path.abspath(outfile), 'wb')
+   except Exception as e:
+      print('Unable to open outfile: %s' % (e,))
+      return 0
+
+   # set outfile metadata to saved wav metadata
+   unprotected.setnchannels(nchannels)
+   unprotected.setsampwidth(sampwidth)
+   unprotected.setframerate(framerate)
+
+   # write decrypted audio using writeframes
+   unprotected.writeframes(audio)
+
+   # close outfile
+   unprotected.close()
+
+def main():
+   parser = ArgumentParser(description='main interface to unprotect songs')
+   parser.add_argument('--outfile', help='path to save the unprotected song', required=True)
+   parser.add_argument('--infile', help='path to protected song', required=True)
+   parser.add_argument('--aes', help='path to AES key file', required=True)
+   parser.add_argument('--hmacKey', help='path to hmac key file', required=True)
+   args = parser.parse_args()
+
+   unprotect(args.infile, args.outfile, args.aes, args.hmacKey)
+
+if __name__ == '__main__':
+   main()
