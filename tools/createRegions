@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
-Description: Generates system wide secrets containing all potential regions
+Description: Generates system wide secrets containing all potential regions and cryptographic keys
 Use: Once per ecosystem of devices
 """
 import json
+import os
+import sys
 from argparse import ArgumentParser
-
+from Cryptodome.PublicKey import RSA
+from Cryptodome.Cipher import AES
+from Cryptodome.Random import get_random_bytes
 
 def main(region_dict, file_name):
     try:
-        secrets = open(file_name, "w")
+        secrets = open(os.path.abspath(file_name), "w")
     except Exception as e:
         print("Unable to open secrets file: %s" % (e,))
         return 0
@@ -17,6 +21,65 @@ def main(region_dict, file_name):
     json.dump(region_dict, secrets)
     secrets.close()
 
+    dir = get_path(file_name)
+
+    print("generating cryptographic keys")
+
+    # Key for metadata and song
+    key1 = get_random_bytes(32)
+    try:
+        hmacKey1 = open(os.path.abspath(dir+'key1.der'), 'wb')
+        try:
+            hmacKey1.write(key1)
+        except Exception as e:
+            print("Failed to write to key1 file: %s" % (e,))
+            sys.exit(e)
+    except Exception as e:
+        print("Unable to open hmac key1 file: %s" % (e,))
+        sys.exit(e)
+
+    hmacKey1.close()
+
+    # Key for hashes
+    key2 = get_random_bytes(32)
+    try:
+        hmacKey2 = open(os.path.abspath(dir+'key2.der'), 'wb')
+        try:
+            hmacKey2.write(key2)
+        except Exception as e:
+            print("Failed to write to key2 file: %s" % (e,))
+            sys.exit(e)
+    except Exception as e:
+        print("Unable to open hmac key2 file: %s" % (e,))
+        sys.exit(e)
+    hmacKey2.close()
+
+    #AES
+    try:
+        aes = open(os.path.abspath(dir+"aes_key"), "wb")
+    except Exception as e:
+        print("Unable to open aes_key file: %s" % (e,))
+        sys.exit(e)
+    try:
+        aes.write(get_random_bytes(32)) # 256-bit key
+    except Exception as e:
+        print("Unable to write to aes_key file: %s" % (e,))
+        sys.exit(e)
+    aes.close()
+
+# removes filename from path
+# Ex. './a/b/file.txt' --> './a/b/'
+#     'file.txt'       --> ''
+def get_path(full_path):
+    found = False
+    for i in range(len(full_path)-1, 0, -1):
+        if full_path[i] == '/':
+            found = True
+            break
+    dir = ''
+    if found:
+        dir = full_path[:i] + '/'
+    return dir
 
 def get_args():
     """gets arguments from command line"""
