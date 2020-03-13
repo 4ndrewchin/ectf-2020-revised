@@ -58,18 +58,17 @@ class ProtectedSong(object):
         # encrypt audio data using AES-256
         cipher = AES.new(aes_key, AES.MODE_CBC)
         ct_bytes = cipher.encrypt(pad(bytes(self.full_song), AES.block_size)) #use pkcs7
-        # enc_audio = cipher.iv + ct_bytes #append iv to beginning of encrypted song
         enc_audio = ct_bytes #append iv to beginning of encrypted song
 
         # hash [metadata + encrypted audio] and then sign
-        h = HMAC.new(hmacKey1, enc_audio, digestmod=SHA256).digest()
-        protected_wav.writeframes(base64.b64encode(h))
+        h = HMAC.new(hmacKey1, self.metadata, digestmod=SHA256)
+        h.update(enc_audio)
+        protected_wav.writeframes(h.digest())
 
-        # hashedSongMeta = SHA256.new(self.metadata)
-        # h = HMAC.new(hmacKey1, hashedSongMeta.digest(), digestmod=SHA256).digest()
-        # protected_wav.writeframes(base64.b64encode(h))
+        # meta data length
+        protected_wav.writeframes(len(self.metadata).to_bytes(4, byteorder='big',signed=False))
 
-        # write song metadata to file
+        # meta data
         protected_wav.writeframes(self.metadata)
 
         # IV
@@ -79,20 +78,16 @@ class ProtectedSong(object):
         numChunks = math.ceil(len(ct_bytes) / 16000)
 
         # total chucks and encrypted song length 
-        protected_wav.writeframes((numChunks).to_bytes(4, byteorder='little', signed=False))
-        protected_wav.writeframes(len(ct_bytes).to_bytes(4, byteorder='little', signed=False))
+        protected_wav.writeframes((numChunks).to_bytes(4, byteorder='big', signed=False))
+        protected_wav.writeframes(len(ct_bytes).to_bytes(4, byteorder='big', signed=False))
 
         # write encrypted audio data to file
         protected_wav.writeframes(enc_audio)
 
-        # storing hashes
         for i in range(1, numChunks+1):
+            # 16000 + iv bytes
             h = HMAC.new(hmacKey2,ct_bytes[(i*16000)-16000:i*16000]+cipher.iv, digestmod=SHA256).digest()
-            protected_wav.writeframes(base64.b64encode(h))
-
-            # h = SHA256.new(ct_bytes[(i*16000)-16000:i*16000]+cipher.iv) 
-            # h2 = HMAC.new(hmacKey2, h.digest(), digestmod=SHA256).digest()
-            # protected_wav.writeframes(base64.b64encode(h2))
+            protected_wav.writeframes(h)
 
         protected_wav.close()
 
