@@ -8,12 +8,13 @@ import struct
 import math
 import os
 import wave
+import base64
 from argparse import ArgumentParser
 import numpy as np
 from Cryptodome.Cipher import AES
 from Cryptodome.PublicKey import RSA
 from Cryptodome.Signature import pss
-from Cryptodome.Hash import SHA256
+from Cryptodome.Hash import SHA256, HMAC
 from Cryptodome.Util.Padding import pad
 
 
@@ -45,15 +46,14 @@ class ProtectedSong(object):
         aes_key = aes.read(32)
         aes.close()
 
-        # read RSA private key
-        rsapriv = open(os.path.abspath(self.path_to_keys+'rsa_private.der'),'rb')
-        rsa_privkey = RSA.importKey(rsapriv.read())
-        rsapriv.close()
+        # read HMAC keys
+        hmacKey1File = open(os.path.abspath(self.path_to_keys+'key1.der'),'rb')
+        hmacKey1 = hmacKey1File.read()
+        hmacKey1File.close()
 
-        # read RSA meta private key
-        rsaprivMeta = open(os.path.abspath(self.path_to_keys+'rsa2_private.der'),'rb')
-        rsa_privkeyMeta = RSA.importKey(rsaprivMeta.read())
-        rsaprivMeta.close()
+        hmacKey2File = open(os.path.abspath(self.path_to_keys+'key2.der'),'rb')
+        hmacKey2 = hmacKey2File.read()
+        hmacKey2File.close()
 
         # encrypt audio data using AES-256
         cipher = AES.new(aes_key, AES.MODE_CBC)
@@ -62,32 +62,59 @@ class ProtectedSong(object):
         enc_audio = ct_bytes #append iv to beginning of encrypted song
 
         # hash [metadata + encrypted audio] and then sign
-        h = SHA256.new(self.metadata)
+        h = HMAC.new(hmacKey1, self.metadata, digestmod=SHA256)
         h.update(enc_audio)
-        signature = pss.new(rsa_privkey).sign(h)
-        protected_wav.writeframes(signature)
+        protected_wav.writeframes(h.digest())
+        # print("meta and song signature 256")
+        # print(len(h.digest()))
+        # print(h.digest())
 
+        # print("MetaData length")
+        # print(len(self.metadata))
+        # print(len(self.metadata).to_bytes(4, byteorder='big',signed=False))
+        protected_wav.writeframes(len(self.metadata).to_bytes(4, byteorder='big',signed=False))
+
+        # print("meta data")
+        # print(len(self.metadata))
+        # print(self.metadata)
         # write song metadata to file
         protected_wav.writeframes(self.metadata)
 
         # IV
         protected_wav.writeframes(cipher.iv)
+        print("IV")
+        print(len(cipher.iv))
+        print(cipher.iv)
 
         # number of 16KB chucks
         numChunks = math.ceil(len(ct_bytes) / 16000)
-
+        print(numChunks)
         # total chucks and encrypted song length 
-        protected_wav.writeframes((numChunks).to_bytes(4, byteorder='little', signed=False))
-        protected_wav.writeframes(len(ct_bytes).to_bytes(4, byteorder='little', signed=False))
+        protected_wav.writeframes((numChunks).to_bytes(4, byteorder='big', signed=False))
+        protected_wav.writeframes(len(ct_bytes).to_bytes(4, byteorder='big', signed=False))
+        # print("numChunks")
+        # print(len((numChunks).to_bytes(4, byteorder='big', signed=False)))
+        # print((numChunks).to_bytes(4, byteorder='big', signed=False))
+        # print("song length")
+        # print(len(len(ct_bytes).to_bytes(4, byteorder='big', signed=False)))
+        # print(len(ct_bytes).to_bytes(4, byteorder='big', signed=False))
 
         # write encrypted audio data to file
+        print("first 10 bytes of encrypted audio")
+        print(enc_audio[:10])
         protected_wav.writeframes(enc_audio)
+        # print("enc audio")
+        # print(len(enc_audio))
+        # print(enc_audio[:10])
 
-        # storing hashes
         for i in range(1, numChunks+1):
-            signedH = SHA256.new(ct_bytes[(i*16000)-16000:i*16000]+cipher.iv)
-            signature = pss.new(rsa_privkeyMeta).sign(signedH)
-            protected_wav.writeframes(signature)
+            # 16000 + iv bytes
+            h = HMAC.new(hmacKey2,ct_bytes[(i*16000)-16000:i*16000]+cipher.iv, digestmod=SHA256).digest()
+            # print(len(h))
+            if i == 1:
+                print("first hash value")
+                print(h)
+            protected_wav.writeframes(h)
 
         protected_wav.close()
 
