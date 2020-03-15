@@ -53,25 +53,25 @@ def main(region_names, user_names, user_secrets, region_secrets, device_dir, reg
     aes_key = aes.read(32)
     aes.close()
 
-    # get rsa private key
+    # get HMAC metadata key
     try:
-        rsapriv_path = os.path.abspath(get_path(region_secrets_path)+'rsa_private.der')
-        rsapriv = open(rsapriv_path, 'rb')
+        hmacmd_path = os.path.abspath(get_path(region_secrets_path)+'hmac_md_key')
+        hmac_md = open(hmacmd_path, 'rb')
     except Exception as e:
-        print('Unable to open rsa_private.der file: {e}'.format(e=e))
+        print('Unable to open hmac_md_key file: {e}'.format(e=e))
         return
-    rsa_privkey = rsapriv.read()
-    rsapriv.close()
+    hmac_md_key = hmac_md.read(32)
+    hmac_md.close()
 
-    # get rsa public key
+    # get HMAC song chunks key
     try:
-        rsapub_path = os.path.abspath(get_path(region_secrets_path)+'rsa_public.der')
-        rsapub = open(rsapub_path, 'rb')
+        hmacchunk_path = os.path.abspath(get_path(region_secrets_path)+'hmac_chunk_key')
+        hmac_chunk = open(hmacchunk_path, 'rb')
     except Exception as e:
-        print('Unable to open rsa_public.der file: {e}'.format(e=e))
+        print('Unable to open hmac_chunk_key file: {e}'.format(e=e))
         return
-    rsa_pubkey = rsapub.read()
-    rsapub.close()
+    hmac_chunk_key = hmac_chunk.read(32)
+    hmac_chunk.close()
 
     # write secrets
     device_secrets.write(f'''
@@ -98,18 +98,18 @@ const char *PROVISIONED_PINS[] = {{ {", ".join(['"' + user_secrets[u]['pin'] + '
 
 /* BASE64 DECODE KEYS BEFORE USING */
 
-#define RSA_PRIVATE_KEY_SZ {len(rsa_privkey)}
-#define b64RSA_PRIVATE_KEY_SZ {len(b64encode(rsa_privkey))}
-const char *RSA_PRIVATE_KEY = {'"'+str(b64encode(rsa_privkey)).strip("b'")+'"'};
-
-#define RSA_PUBLIC_KEY_SZ {len(rsa_pubkey)}
-#define b64RSA_PUBLIC_KEY_SZ {len(b64encode(rsa_pubkey))}
-const char *RSA_PUBLIC_KEY = {'"'+str(b64encode(rsa_pubkey)).strip("b'")+'"'};
-
 #define AES_BLK_SZ 16
 #define AES_KEY_SZ {len(aes_key)}
 #define b64AES_KEY_SZ {len(b64encode(aes_key))}
 const char *AES_KEY = {'"'+str(b64encode(aes_key)).strip("b'")+'"'};
+
+#define HMAC_MD_KEY_SZ {len(hmac_md_key)}
+#define b64HMAC_MD_KEY_SZ {len(b64encode(hmac_md_key))}
+const char *HMAC_MD_KEY = {'"'+str(b64encode(hmac_md_key)).strip("b'")+'"'};
+
+#define HMAC_CHUNK_KEY_SZ {len(hmac_chunk_key)}
+#define b64HMAC_CHUNK_KEY_SZ {len(b64encode(hmac_chunk_key))}
+const char *HMAC_CHUNK_KEY = {'"'+str(b64encode(hmac_chunk_key)).strip("b'")+'"'};
 
 #endif // SECRETS_H
 ''')

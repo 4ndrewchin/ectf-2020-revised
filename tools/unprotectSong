@@ -16,10 +16,9 @@ from Cryptodome.PublicKey import RSA
 from Cryptodome.Signature import pss
 from Cryptodome.Util.Padding import unpad
 
-DECRYPT_CHUNKS = True
 CHUNK_SZ = 16000
 
-def unprotect(infile, outfile, aeskey_f, hmacKey1File, hmacKey2File):
+def unprotect(infile, outfile, aeskey_f, hmacMdKeyFile, hmacChunkKeyFile):
    # read aeskey_f into byte buffer
    try:
       aes = open(os.path.abspath(aeskey_f), 'rb')
@@ -31,20 +30,20 @@ def unprotect(infile, outfile, aeskey_f, hmacKey1File, hmacKey2File):
 
    #read hmacKey's into buffer
    try:
-      hmacKeyFd1 = open(os.path.abspath(hmacKey1File), 'rb')
+      hmacMdKeyFd = open(os.path.abspath(hmacMdKeyFile), 'rb')
    except Exception as e:
-      print('unable to open rsa_public.der file: %s' % (e,))
+      print('unable to open hmacMdKeyFile file: %s' % (e,))
       return 0
-   hmacKey1 = hmacKeyFd1.read()
-   hmacKeyFd1.close()
+   hmacMdKey = hmacMdKeyFd.read()
+   hmacMdKeyFd.close()
 
    try:
-      hmacKeyFd2 = open(os.path.abspath(hmacKey2File), 'rb')
+      hmacChunkKeyFd = open(os.path.abspath(hmacChunkKeyFile), 'rb')
    except Exception as e:
-      print('unable to open rsa_public.der file: %s' % (e,))
+      print('unable to open hmacChunkKeyFile file: %s' % (e,))
       return 0
-   hmacKey2 = hmacKeyFd2.read()
-   hmacKeyFd2.close()
+   hmacChunkKey = hmacChunkKeyFd.read()
+   hmacChunkKeyFd.close()
 
    # wave.open infile
    try:
@@ -65,42 +64,43 @@ def unprotect(infile, outfile, aeskey_f, hmacKey1File, hmacKey2File):
    protected.close()
 
    # get segments of encrypted file
-   signature_len = 32 
-   meta_data_bytes = 4 
-   start_meta_data =  signature_len + meta_data_bytes
+   signature_len = 32
 
    # get signature with first 256
    signature = data[:signature_len]
 
-   # get length of meta data
-   meta_data_len = data[signature_len:start_meta_data]
-   int_meta_data_len = int.from_bytes(meta_data_len, byteorder='big', signed=False)
-
-   # get meta data
-   end_meta_data = start_meta_data+int_meta_data_len
-   meta_data = data[start_meta_data:start_meta_data+int_meta_data_len]
-
    # get iv
-   end_iv = end_meta_data + 16
-   iv = data[end_meta_data:end_iv]
+   end_iv = signature_len + 16
+   iv = data[signature_len:end_iv]
    
    # get the number of 16000 chunks and audio length in bytes
    numChunks = data[end_iv:end_iv+4]
-   intNumChunks = int.from_bytes(numChunks, byteorder='big', signed=False)
+   intNumChunks = int.from_bytes(numChunks, byteorder='little', signed=False)
    audio_length = data[end_iv+4:end_iv+8]
-   intAudioLength = int.from_bytes(audio_length, byteorder='big', signed=False)
+   intAudioLength = int.from_bytes(audio_length, byteorder='little', signed=False)
+
+   # get length of meta data
+   meta_data_len = data[end_iv+8] # first byte of md is len
+
+   # get meta data
+   end_meta_data = end_iv+8+meta_data_len
+   meta_data = data[end_iv+8:end_meta_data]
 
    # get the encrypted AES audio
-   enc_audio = data[end_iv+8:end_iv+8+intAudioLength]
+   enc_audio = data[end_meta_data:end_meta_data+intAudioLength]
 
    # get all hashes of each block
-   block_hashes = data[end_iv+8+intAudioLength:]
+   block_hashes = data[end_meta_data+intAudioLength:]
 
-   # recompute the hash of meta data and encrypted song
-   verifier = HMAC.new(hmacKey1, meta_data, digestmod=SHA256) 
-   verifier = verifier.update(enc_audio) 
+   # recompute the hash of all metadata
+   verifier = HMAC.new(hmacMdKey, iv, digestmod=SHA256) 
+   verifier = verifier.update(numChunks)
+   verifier = verifier.update(audio_length)
+   verifier = verifier.update(meta_data)
+   #verifier = verifier.update(enc_audio)
+   #verifier = verifier.update(block_hashes)
 
-   print('Verifying signature...', end='')
+   print('Verifying metadata signature...', end='')
    try:
       verifier.verify(signature)
    except Exception as e:
@@ -114,47 +114,42 @@ def unprotect(infile, outfile, aeskey_f, hmacKey1File, hmacKey2File):
       print('Something is wrong. Metadata max size is 100, got %s' % md_size)
       return 0
    cipher = AES.new(aes_key, AES.MODE_CBC, iv)
-   print('Chunk Decryption: '+str(DECRYPT_CHUNKS))
 
-   # if DECRYPT_CHUNKS:
-   #    print('Chunk size: '+str(CHUNK_SZ))
+   #decrypting in chunks
+   rem = len(enc_audio)
+   print('TOTAL ENCRYPTED LEN: '+str(rem))
+   audio = bytes()
+   print('num 16KB chunks: '+str(intNumChunks))
+   counter = 0
+   start = 0
+   for i in range(0, intNumChunks):
 
-   if not DECRYPT_CHUNKS:
+      counter = counter + 1
+      if rem < CHUNK_SZ:
+         increment = rem
+      else:
+         increment = CHUNK_SZ
+      rem = rem - increment
+
+      e_chunk = enc_audio[start:start+increment]
+      start = start + increment
+
+      # recompute the hash
       try:
-        audio = unpad(cipher.decrypt(enc_audio[AES.block_size:]), AES.block_size) #use pkcs7
-      except Exception as e:
-        print('Unable to unpad encrypted audio: %s' % (e,))
-        return 0
-   else:
-      #decrypting in chunks
-      rem = len(enc_audio)
-      print('TOTAL ENCRYPTED LEN: '+str(rem))
-      audio = bytes()
-      print('num 16KB chunks: '+str(intNumChunks))
-      counter = 0
-      start = 0
-      for i in range(0, intNumChunks):
-
-         counter = counter + 1
-         if rem < CHUNK_SZ:
-            increment = rem
-         else:
-            increment = CHUNK_SZ
-         rem = rem - increment
-
-         e_chunk = enc_audio[start:start+increment]
-         start = start + increment
-
-         # recompute the hash
-         h = HMAC.new(hmacKey2, e_chunk+iv, digestmod=SHA256)
+         h = HMAC.new(hmacChunkKey, e_chunk+iv, digestmod=SHA256)
          h.verify(block_hashes[i*32:32+i*32])
+      except Exception as e:
+         print('Failed to verify chunk #' + str(i))
+         return 0
 
-         # decrypt block
-         p_chunk = cipher.decrypt(e_chunk)
+      # decrypt block
+      p_chunk = cipher.decrypt(e_chunk)
 
-         if i == intNumChunks-1:
-            p_chunk = unpad(p_chunk, AES.block_size)
-         audio += p_chunk
+      if i == intNumChunks-1:
+         p_chunk = unpad(p_chunk, AES.block_size)
+      audio += p_chunk
+      
+   print('Song successfully decrypted')
 
    # wave.open outfile
    try:
@@ -179,11 +174,11 @@ def main():
    parser.add_argument('--outfile', help='path to save the unprotected song', required=True)
    parser.add_argument('--infile', help='path to protected song', required=True)
    parser.add_argument('--aes', help='path to AES key file', required=True)
-   parser.add_argument('--hmacKey1', help='path to hmac key file', required=True)
-   parser.add_argument('--hmacKey2', help='path to hmac key file', required=True)
+   parser.add_argument('--mdKey', help='path to hmac metadata key file', required=True)
+   parser.add_argument('--chunkKey', help='path to hmac chunk key file', required=True)
    args = parser.parse_args()
 
-   unprotect(args.infile, args.outfile, args.aes, args.hmacKey1, args.hmacKey2)
+   unprotect(args.infile, args.outfile, args.aes, args.mdKey, args.chunkKey)
 
 if __name__ == '__main__':
    main()

@@ -47,47 +47,50 @@ class ProtectedSong(object):
         aes.close()
 
         # read HMAC keys
-        hmacKey1File = open(os.path.abspath(self.path_to_keys+'key1.der'),'rb')
+        hmacKey1File = open(os.path.abspath(self.path_to_keys+'hmac_md_key'),'rb')
         hmacKey1 = hmacKey1File.read()
         hmacKey1File.close()
 
-        hmacKey2File = open(os.path.abspath(self.path_to_keys+'key2.der'),'rb')
+        hmacKey2File = open(os.path.abspath(self.path_to_keys+'hmac_chunk_key'),'rb')
         hmacKey2 = hmacKey2File.read()
         hmacKey2File.close()
 
         # encrypt audio data using AES-256
         cipher = AES.new(aes_key, AES.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(bytes(self.full_song), AES.block_size)) #use pkcs7
-        enc_audio = ct_bytes #append iv to beginning of encrypted song
+        enc_audio = cipher.encrypt(pad(bytes(self.full_song), AES.block_size)) #use pkcs7
 
-        # hash [metadata + encrypted audio] and then sign
-        h = HMAC.new(hmacKey1, self.metadata, digestmod=SHA256)
-        h.update(enc_audio)
-        protected_wav.writeframes(h.digest())
+        # calculate and convert total chucks and encrypted song length 
+        numChunks = math.ceil(len(enc_audio) / 16000)
+        nChunksBytes = (numChunks).to_bytes(4, byteorder='little', signed=False)
+        eAudioLenBytes = len(enc_audio).to_bytes(4, byteorder='little', signed=False)
 
-        # meta data length
-        protected_wav.writeframes(len(self.metadata).to_bytes(4, byteorder='big',signed=False))
-
-        # meta data
-        protected_wav.writeframes(self.metadata)
-
-        # IV
-        protected_wav.writeframes(cipher.iv)
-
-        # number of 16KB chucks
-        numChunks = math.ceil(len(ct_bytes) / 16000)
-
-        # total chucks and encrypted song length 
-        protected_wav.writeframes((numChunks).to_bytes(4, byteorder='big', signed=False))
-        protected_wav.writeframes(len(ct_bytes).to_bytes(4, byteorder='big', signed=False))
-
-        # write encrypted audio data to file
-        protected_wav.writeframes(enc_audio)
+        chunkHmacs = []        
 
         for i in range(1, numChunks+1):
             # 16000 + iv bytes
-            h = HMAC.new(hmacKey2,ct_bytes[(i*16000)-16000:i*16000]+cipher.iv, digestmod=SHA256).digest()
-            protected_wav.writeframes(h)
+            h = HMAC.new(hmacKey2,enc_audio[(i*16000)-16000:i*16000]+cipher.iv, digestmod=SHA256).digest()
+            chunkHmacs.append(h)
+
+        # create hmac of [iv + nchunks + e_audio_len + MD]
+        h = HMAC.new(hmacKey1, cipher.iv, digestmod=SHA256)
+        h.update(nChunksBytes)
+        h.update(eAudioLenBytes)
+        h.update(self.metadata)
+        #h.update(enc_audio)
+        #for hmac in chunkHmacs:
+        #    h.update(hmac)
+
+        # write everything to file
+        protected_wav.writeframes(h.digest())
+        protected_wav.writeframes(cipher.iv)
+        protected_wav.writeframes(nChunksBytes)
+        protected_wav.writeframes(eAudioLenBytes)
+        protected_wav.writeframes(self.metadata)
+        protected_wav.writeframes(enc_audio)
+        for hmac in chunkHmacs:
+            protected_wav.writeframes(hmac)
+
+        print(chunkHmacs[0])
 
         protected_wav.close()
 
