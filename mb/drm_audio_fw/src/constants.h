@@ -28,8 +28,8 @@
 #define MAX_USERS 64
 #define USERNAME_SZ 64
 #define MAX_PIN_SZ 64
-#define MAX_SONG_SZ (1<<27) // support 128 MB songs
-#define SIGNATURE_SZ 256
+#define MAX_SONG_SZ (1<<25)
+#define HMAC_SZ 32
 
 
 // LED colors and controller
@@ -71,16 +71,20 @@ typedef struct __attribute__((__packed__)) {
     u32 file_size;
     char packing2[32];
     u32 wav_size;
-    char signature[SIGNATURE_SZ];
+    char mdHmac[HMAC_SZ];
+    unsigned char iv[16]; // AES initialization vector
+    unsigned int numChunks;
+    unsigned int encAudioLen;
     drm_md md;
 } song;
 
 // accessors for variable-length metadata fields
 #define get_drm_rids(d) (d.md.buf)
 #define get_drm_uids(d) (d.md.buf + d.md.num_regions)
-#define get_drm_aesiv(d) ((char *)(&d.md) + d.md.md_size)
-#define get_drm_song(d) ((char *)(&d.md) + d.md.md_size + 16)
-
+#define get_drm_song(d) ((unsigned char *)(&d.md) + d.md.md_size)
+// index the chunk HMACs just like an array
+// Ex. get_drm_hmac(song, 0) == song.hmacs[0]
+#define get_drm_hmac(d, i) (get_drm_song(d) + d.encAudioLen + (i*HMAC_SZ))
 
 // shared buffer values
 enum commands { QUERY_PLAYER, QUERY_SONG, LOGIN, LOGOUT, SHARE, PLAY, STOP, DIGITAL_OUT, PAUSE, RESTART, FF, RW };
@@ -123,8 +127,8 @@ typedef struct {
     char pin[MAX_PIN_SZ];                   // logged on pin
     song_md song_md;                        // current song metadata
     char aesKey[44];                        // base64 decoded AES key
-    char hmacKey[44];                       // base64 decoded HMAC key
     char hmacMdKey[44];                     // base64 decoded HMAC metadata key
+    char hmacChunkKey[44];                       // base64 decoded HMAC encrypted audio chunk key
 } internal_state;
 
 

@@ -17,6 +17,7 @@ from Cryptodome.Signature import pss
 from Cryptodome.Hash import SHA256, HMAC
 from Cryptodome.Util.Padding import pad
 
+CHUNK_SZ = 16000
 
 class ProtectedSong(object):
     """Example song object for protected song"""
@@ -60,15 +61,15 @@ class ProtectedSong(object):
         enc_audio = cipher.encrypt(pad(bytes(self.full_song), AES.block_size)) #use pkcs7
 
         # calculate and convert total chucks and encrypted song length 
-        numChunks = math.ceil(len(enc_audio) / 16000)
+        numChunks = math.ceil(len(enc_audio) / CHUNK_SZ)
         nChunksBytes = (numChunks).to_bytes(4, byteorder='little', signed=False)
         eAudioLenBytes = len(enc_audio).to_bytes(4, byteorder='little', signed=False)
 
         chunkHmacs = []        
 
         for i in range(1, numChunks+1):
-            # 16000 + iv bytes
-            h = HMAC.new(hmacKey2,enc_audio[(i*16000)-16000:i*16000]+cipher.iv, digestmod=SHA256).digest()
+            # CHUNK_SZ + iv bytes
+            h = HMAC.new(hmacKey2,enc_audio[(i*CHUNK_SZ)-CHUNK_SZ:i*CHUNK_SZ]+cipher.iv, digestmod=SHA256).digest()
             chunkHmacs.append(h)
 
         # create hmac of [iv + nchunks + e_audio_len + MD]
@@ -89,8 +90,6 @@ class ProtectedSong(object):
         protected_wav.writeframes(enc_audio)
         for hmac in chunkHmacs:
             protected_wav.writeframes(hmac)
-
-        print(chunkHmacs[0])
 
         protected_wav.close()
 

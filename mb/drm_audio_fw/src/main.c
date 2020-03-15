@@ -20,6 +20,7 @@
 #include "wolfssl/wolfcrypt/coding.h"
 #include "wolfssl/wolfcrypt/wc_encrypt.h"
 #include "wolfssl/wolfcrypt/hmac.h"
+#include "time.h"
 
 
 //////////////////////// GLOBALS ////////////////////////
@@ -232,36 +233,56 @@ int initCryptoKeys() {
     if (Base64_Decode((void *)AES_KEY, (word32)b64AES_KEY_SZ, (void *)s.aesKey, &outLen) != 0) {
         return -1;
     }
-    outLen = b64AES_KEY_SZ;
+    outLen = b64HMAC_MD_KEY_SZ;
     if (Base64_Decode((void *)HMAC_MD_KEY, (word32)b64HMAC_MD_KEY_SZ, (void *)s.hmacMdKey, &outLen) != 0) {
         return -1;
     }
-    outLen = b64AES_KEY_SZ;
-    if (Base64_Decode((void *)HMAC_KEY, (word32)b64HMAC_KEY_SZ, (void *)s.hmacKey, &outLen) != 0) {
+    outLen = b64HMAC_CHUNK_KEY_SZ;
+    if (Base64_Decode((void *)HMAC_CHUNK_KEY, (word32)b64HMAC_CHUNK_KEY_SZ, (void *)s.hmacChunkKey, &outLen) != 0) {
         return -1;
     }
     return 0;
 }
 
+
 /* create HMAC using data and key and compare to DRM HMAC
  * return 0 on success, -1 otherwise
  *
- * hmac    : Hmac object
- * data    : data to create HMAC with
- * dataLen : length of data in bytes
- * hash    : buffer to store hash of data
- * drmHmac : HMAC to compare computed HMAC to
+ * key      : HMAC key
+ * keyLen   : HMAC key length
+ * args     : number of different data to update hmac object with
+ * data     : array of char pointers (data) to create HMAC with
+ * dataLens : length of each data to be included in hash
+ * drmHmac  : HMAC to compare computed HMAC to
  */
-int verifyHmac(Hmac *hmac, char* data, int dataLen, char* hash, char* drmHmac) {
-    if (wc_HmacUpdate(hmac, (void *)data, dataLen) != 0) {
+int verifyHmac(char* key, int keyLen, int args, char* data[], int dataLens[], char* drmHmac) {
+    if (key == NULL || keyLen <= 0 || args <= 0 || data == NULL || dataLens == NULL || drmHmac == NULL) {
         return -1;
     }
-    if (wc_HmacFinal(hmac, hash) != 0) {
+    Hmac hmac;
+    int total = 0;
+    if (wc_HmacSetKey(&hmac, SHA256, key, keyLen) != 0) {
         return -1;
     }
-    if (memcmp(hash, (void *)drmHmac, SIGNATURE_SZ) != 0) {
+    for (int i = 0; i < args; i++) {
+        if (wc_HmacUpdate(&hmac, (void *)data[i], dataLens[i]) != 0) {
+            return -1;
+        }
+        total += dataLens[i];
+    }
+    char hash[total];
+    if (wc_HmacFinal(&hmac, hash) != 0) {
         return -1;
     }
+    if (memcmp(hash, (void *)drmHmac, HMAC_SZ) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+
+int updateHmac(Hmac *hmac) {
+    // TODO
     return 0;
 }
 
@@ -306,10 +327,10 @@ void login() {
 
 // attempt to log out
 void logout() {
-    if (c->login_status) {
+    if (s.logged_in) {
         mb_printf("Logging out...\r\n");
         s.logged_in = 0;
-        c->login_status = 0;
+        //c->login_status = 0;
         memset((void*)c->username, 0, USERNAME_SZ);
         memset((void*)c->pin, 0, MAX_PIN_SZ);
         s.uid = 0;
@@ -386,7 +407,22 @@ void share_song() {
         mb_printf("Username not found\r\n");
         c->song.wav_size = 0;
         return;
-    } else if (s.song_md.num_users >= MAX_USERS) {
+    }
+    
+    // verify metadata HMAC
+    // Hmac hmac;
+    // char hash[HMAC_SZ];
+    // if (wc_HmacSetKey(&hmac, SHA256, s.hmacMdKey, HMAC_MD_KEY_SZ) != 0) {
+    //     mb_printf("Cannot share song\r\n");
+    //     return;
+    // }
+    // if (verifyHmac(&hmac, /*drm except wav md and hmac*/, /*datalen*/, hash, /*get_drm_hmac*/) != 0) {
+    //     mb_printf("Cannot share song\r\n");
+    //     return;
+    // }
+
+    // prevent integer overflow -- simple alternative to hash map
+    if (s.song_md.num_users >= MAX_USERS) {
         mb_printf("Cannot share song\r\n");
         c->song.wav_size = 0;
         return;
@@ -396,6 +432,13 @@ void share_song() {
     s.song_md.uids[s.song_md.num_users++] = uid;
     new_md_len = gen_song_md(new_md);
     shift = new_md_len - s.song_md.md_size;
+
+    // update metadata HMAC
+    // if (updateHmac(&hmac) != 0) {
+    //     mb_printf("Cannot share song\r\n");
+    //     c->song.wav_size = 0;
+    //     return;
+    // }
 
     // shift over song and add new metadata
     if (shift) {
@@ -413,35 +456,29 @@ void share_song() {
 
 // plays a song and looks for play-time commands
 void play_song() {
-    u32 counter = 0, rem, cp_num, cp_xfil_cnt, offset, dma_cnt, lenAudio, *fifo_fill, length;
+    u32 counter = 0, rem, cp_num, cp_xfil_cnt, offset, dma_cnt, lenAudio, *fifo_fill, total_len, all_md_len;
     int ret = -1;
-    char hash[SIGNATURE_SZ];
-    Hmac hmac;
-
-    // use HMAC metadata key for verifying metadata (and rest of data)
-    if (wc_HmacSetKey(&hmac, SHA256, s.hmacMdKey, HMAC_MD_KEY_SZ) != 0) {
-        mb_printf("Operation failed REMOVE->HMACSETKEY");
-        return;
-    }
+    char mdHmac[HMAC_SZ];
+    memcpy(mdHmac, (void *)(c->song.mdHmac), HMAC_SZ);
 
     mb_printf("Reading Audio File...");
     load_song_md();
 
-    // WAV size is size of all data following the WAV metadata
-    length = c->song.wav_size - SIGNATURE_SZ;
-    lenAudio = c->song.wav_size - SIGNATURE_SZ - c->song.md.md_size - AES_BLK_SZ;
+    total_len = c->song.wav_size - HMAC_SZ;
+    lenAudio = c->song.encAudioLen;
+    all_md_len = 16 + sizeof(int)*2 + c->song.md.md_size;
+    unsigned int nchunks = c->song.numChunks;
 
     mb_printf("Verifying Audio File...");
-    if (verifyHmac(&hmac, /*drm except wav md and hmac*/, /*datalen*/, hash, /*get_drm_hmac*/) != 0) {
+    char* data[1];
+    data[0] = c->song.iv;
+    int dataLens[1];
+    dataLens[0] = all_md_len;
+    if (verifyHmac(s.hmacMdKey, HMAC_MD_KEY_SZ, 1, data, dataLens, mdHmac) != 0) {
         mb_printf("Failed to play audio");
         return;
     }
     mb_printf("Successfully Verified Audio File");
-
-    // calculate total number of chunks to decrypt
-    mb_printf("Song length = %dB", lenAudio);
-    int nchunks = ((lenAudio % CHUNK_SZ) == 0) ? (lenAudio / CHUNK_SZ) : ((lenAudio / CHUNK_SZ)+1);
-    mb_printf("# chunks: %d", nchunks);
 
     // truncate song if locked
     if (lenAudio > PREVIEW_SZ && is_locked()) {
@@ -453,15 +490,12 @@ void play_song() {
     }
 
     int firstChunk = TRUE; // whether we are operating on the first chunk of the audio
-    char iv[AES_BLK_SZ]; // use this as iv for all audio chunks after the first
+    char iv[AES_BLK_SZ];
+    memcpy(iv, (void *)c->song.iv, AES_BLK_SZ);
     // stack size MUST be increased to fit this (default is 1KB)
     char plainChunk[CHUNK_SZ]; // current decrypted chunk
-
-    // use HMAC key for verifying audio chunks
-    if (wc_HmacSetKey(&hmac, SHA256, s.hmacKey, HMAC_KEY_SZ) != 0) {
-        mb_printf("Operation failed REMOVE->HMACSETKEY");
-        return;
-    }
+    char eChunkIv[CHUNK_SZ+AES_BLK_SZ];
+    int chunk = 0;
 
     rem = lenAudio;
     fifo_fill = (u32 *)XPAR_FIFO_COUNT_AXI_GPIO_0_BASEADDR;
@@ -489,6 +523,7 @@ void play_song() {
                 return;
             case RESTART:
                 mb_printf("Restarting song... \r\n");
+                chunk = 0;
                 rem = lenAudio; // reset song counter
                 firstChunk = TRUE;
                 set_playing();
@@ -502,16 +537,21 @@ void play_song() {
         offset = (counter++ % 2 == 0) ? 0 : CHUNK_SZ;
 
         // if first chunk, grab the IV for decryption
-        // if not the first chunk, use the most previous block as te IV
+        // if not the first chunk, use the most previous block as the IV
         if (firstChunk) {
             firstChunk = FALSE;
-            memcpy(iv, (void *)(get_drm_aesiv(c->song)), AES_BLK_SZ);
         } else {
             memcpy(iv, (void *)(get_drm_song(c->song) + lenAudio - rem - AES_BLK_SZ), AES_BLK_SZ);
         }
 
         // verify chunk using HMAC
-        if (verifyHmac(&hmac, (char*)(get_drm_song(c->song) + lenAudio - rem), cp_num, hash, /*get_drm_hmac*/) != 0) {
+        char* data2[2];
+        data2[0] = get_drm_song(c->song) + lenAudio - rem;
+        data2[1] = c->song.iv;
+        int dataLens2[2];
+        dataLens2[0] = cp_num;
+        dataLens2[1] = AES_BLK_SZ;
+        if (verifyHmac(s.hmacChunkKey, HMAC_CHUNK_KEY_SZ, 2, data2, dataLens2, get_drm_hmac(c->song, chunk++)) != 0) {
             mb_printf("Failed to play audio");
             return;
         }
@@ -519,14 +559,27 @@ void play_song() {
         // decrypt chunk
         ret = wc_AesCbcDecryptWithKey((byte*)plainChunk, (void*)(get_drm_song(c->song) + lenAudio - rem), cp_num, (byte*)s.aesKey, (word32)AES_KEY_SZ, (byte*)iv);
         if (ret != 0) {
-            mb_printf("Operation failed REMOVE DECRYPT");
+            mb_printf("Failed to play audio");
             return;
         }
 
         // if last chunk unpad using PKCS#7
         if (counter == nchunks) {
-            // TODO
-            //mb_printf("last block: %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", (void*)plainChunk[7200], (void*)plainChunk[7201], (void*)plainChunk[7202], (void*)plainChunk[7203], (void*)plainChunk[7204], (void*)plainChunk[7205], (void*)plainChunk[7206], (void*)plainChunk[7207], (void*)plainChunk[7208], (void*)plainChunk[7209], (void*)plainChunk[7210], (void*)plainChunk[7211], (void*)plainChunk[7212], (void*)plainChunk[7213], (void*)plainChunk[7214], (void*)plainChunk[7215]);
+            unsigned int pads = (unsigned int*)plainChunk[cp_num-1];
+            if (pads > 16 || pads == 0) {
+                mb_printf("Failed to play audio");
+                return;
+            }
+            for (int i = 1; i <= pads; i++) {
+                unsigned int bite = (unsigned int*)plainChunk[cp_num-i];
+                if (bite != pads) {
+                    mb_printf("Failed to play audio");
+                    return;
+                }
+            }
+            // padding is valid
+            cp_num -= pads;
+            rem -= pads;
         }
 
         // do first mem cpy here into DMA BRAM
@@ -557,6 +610,7 @@ void play_song() {
 
 
 // removes DRM data from song for digital out
+// TODO
 void digital_out() {
     // remove metadata size from file and chunk sizes
     c->song.file_size -= c->song.md.md_size;
@@ -662,8 +716,8 @@ int main() {
             }
 
             // reset statuses and sleep to allowe player to recognize WORKING state
-            strcpy((char *)c->username, s.username);
-            c->login_status = s.logged_in;
+            //strcpy((char *)c->username, s.username);
+            //c->login_status = s.logged_in;
             usleep(500);
             set_stopped();
         }

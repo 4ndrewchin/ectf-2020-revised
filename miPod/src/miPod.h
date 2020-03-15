@@ -18,8 +18,8 @@
 #define MAX_USERS 64
 #define USERNAME_SZ 64
 #define MAX_PIN_SZ 64
-#define MAX_SONG_SZ (1<<27) // support 128 MB songs
-#define SIGNATURE_SZ 256
+#define MAX_SONG_SZ (1<<25)
+#define HMAC_SZ 32
 
 // printing utility
 #define MP_PROMPT "mP> "
@@ -57,12 +57,20 @@ typedef struct __attribute__((__packed__)) {
 // packing values skip over non-relevant WAV metadata
 typedef struct __attribute__((__packed__)) {
     char packing1[4];
-    int file_size;
+    unsigned int file_size;
     char packing2[32];
-    int wav_size;
-    char signature[SIGNATURE_SZ];
+    unsigned int wav_size;
+    char mdHmac[HMAC_SZ];
+    char iv[16]; // AES initialization vector
+    unsigned int numChunks;
+    unsigned int encAudioLen;
     drm_md md;
 } song;
+
+// accessors for variable-length metadata fields
+//#define get_drm_rids(d) (d.md.buf)
+//#define get_drm_uids(d) (d.md.buf + d.md.num_regions)
+//#define get_drm_song(d) ((char *)(&d.md) + d.md.md_size)
 
 
 // shared buffer values

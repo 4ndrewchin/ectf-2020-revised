@@ -148,7 +148,7 @@ def unprotect(infile, outfile, aeskey_f, hmacMdKeyFile, hmacChunkKeyFile):
       if i == intNumChunks-1:
          p_chunk = unpad(p_chunk, AES.block_size)
       audio += p_chunk
-      
+
    print('Song successfully decrypted')
 
    # wave.open outfile

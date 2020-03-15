@@ -109,6 +109,8 @@ void login(char *username, char *pin) {
     strcpy((void*)c->username, username);
     strcpy((void*)c->pin, pin);
     send_command(LOGIN);
+    while (c->drm_state == STOPPED) continue; // wait for DRM to start working
+    while (c->drm_state == WORKING) continue; // wait for DRM to finishk
 }
 
 
@@ -246,6 +248,7 @@ int play_song(char *song_name) {
     // drive the DRM
     send_command(PLAY);
     while (c->drm_state == STOPPED) continue; // wait for DRM to start playing
+    while (c->drm_state != PLAYING) continue; // wait for DRM to start playing
 
     // play loop
     while(1) {
