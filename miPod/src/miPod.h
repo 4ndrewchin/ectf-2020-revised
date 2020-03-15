@@ -13,7 +13,7 @@
 #define USR_CMD_SZ 64
 
 // protocol constants
-#define MAX_REGIONS 64
+#define MAX_REGIONS 32
 #define REGION_NAME_SZ 64
 #define MAX_USERS 64
 #define USERNAME_SZ 64
@@ -67,10 +67,6 @@ typedef struct __attribute__((__packed__)) {
     drm_md md;
 } song;
 
-// accessors for variable-length metadata fields
-//#define get_drm_rids(d) (d.md.buf)
-//#define get_drm_uids(d) (d.md.buf + d.md.num_regions)
-//#define get_drm_song(d) ((char *)(&d.md) + d.md.md_size)
 
 
 // shared buffer values
@@ -82,8 +78,7 @@ enum states   { STOPPED, WORKING, PLAYING, PAUSED };
 typedef volatile struct __attribute__((__packed__)) {
     char cmd;                   // from commands enum
     char drm_state;             // from states enum
-    char login_status;          // 0 = logged off, 1 = logged on
-    char padding;               // not used
+    char padding[2];            // unused
     char username[USERNAME_SZ]; // stores logged in or attempted username
     char pin[MAX_PIN_SZ];       // stores logged in or attempted pin
 

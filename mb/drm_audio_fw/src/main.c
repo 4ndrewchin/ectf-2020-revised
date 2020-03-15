@@ -20,7 +20,6 @@
 #include "wolfssl/wolfcrypt/coding.h"
 #include "wolfssl/wolfcrypt/wc_encrypt.h"
 #include "wolfssl/wolfcrypt/hmac.h"
-#include "time.h"
 
 
 //////////////////////// GLOBALS ////////////////////////
@@ -92,7 +91,7 @@ int rid_to_region_name(char rid, char **region_name, int provisioned_only) {
 
 
 // looks up the rid corresponding to the region name
-int region_name_to_rid(char *region_name, char *rid, int provisioned_only) {
+/*int region_name_to_rid(char *region_name, char *rid, int provisioned_only) {
     for (int i = 0; i < NUM_REGIONS; i++) {
         if (!strcmp(region_name, REGION_NAMES[i]) &&
             (!provisioned_only || is_provisioned_rid(REGION_IDS[i]))) {
@@ -104,7 +103,7 @@ int region_name_to_rid(char *region_name, char *rid, int provisioned_only) {
     mb_printf("Could not find region name '%s'\r\n", region_name);
     *rid = -1;
     return FALSE;
-}
+}*/
 
 
 // returns whether a uid has been provisioned
@@ -296,10 +295,6 @@ void login() {
     memcpy((void*)s.username, (void*)c->username, USERNAME_SZ);
     memcpy((void*)s.pin, (void*)c->pin, MAX_PIN_SZ);
 
-    // clear shared memory
-    memset((void*)c->username, 0, USERNAME_SZ);
-    memset((void*)c->pin, 0, MAX_PIN_SZ);
-
     if (s.logged_in) {
         mb_printf("Already logged in. Please log out first.\r\n");
     } else {
@@ -312,6 +307,9 @@ void login() {
                     s.logged_in = 1;
                     s.uid = PROVISIONED_UIDS[i];
                     mb_printf("Logged in for user '%s'\r\n", (void *)s.username);
+                    // clear shared memory
+                    memset((void*)c->username, 0, USERNAME_SZ);
+                    memset((void*)c->pin, 0, MAX_PIN_SZ);
                     return;
                 } else {
                     break;
@@ -319,8 +317,8 @@ void login() {
             }
         }
         // reject login attempt and wait 5 seconds
-        mb_printf("Login unsuccessful\r\n");
-        usleep(5000000); // TODO: actually must be (5 - max time in loop above) seconds
+        mb_printf("Login failed\r\n");
+        usleep(5000000);
     }
 }
 
@@ -330,7 +328,6 @@ void logout() {
     if (s.logged_in) {
         mb_printf("Logging out...\r\n");
         s.logged_in = 0;
-        //c->login_status = 0;
         memset((void*)c->username, 0, USERNAME_SZ);
         memset((void*)c->pin, 0, MAX_PIN_SZ);
         s.uid = 0;
@@ -352,8 +349,6 @@ void query_player() {
     for (int i = 0; i < NUM_PROVISIONED_USERS; i++) {
         strcpy((char *)q_user_lookup(c->query, i), USERNAMES[i]);
     }
-
-    mb_printf("Queried player (%d regions, %d users)\r\n", c->query.num_regions, c->query.num_users);
 }
 
 
@@ -383,15 +378,13 @@ void query_song() {
         uid_to_username(s.song_md.uids[i], &name, FALSE);
         strcpy((char *)q_user_lookup(c->query, i), name);
     }
-
-    mb_printf("Queried song (%d regions, %d users)\r\n", c->query.num_regions, c->query.num_users);
 }
 
 
 // add a user to the song's list of users
 void share_song() {
     int new_md_len, shift;
-    char new_md[256], uid;
+    char new_md[MAX_MD_SZ], mdHmac[HMAC_SZ], uid;
 
     // reject non-owner attempts to share
     load_song_md();
@@ -408,18 +401,6 @@ void share_song() {
         c->song.wav_size = 0;
         return;
     }
-    
-    // verify metadata HMAC
-    // Hmac hmac;
-    // char hash[HMAC_SZ];
-    // if (wc_HmacSetKey(&hmac, SHA256, s.hmacMdKey, HMAC_MD_KEY_SZ) != 0) {
-    //     mb_printf("Cannot share song\r\n");
-    //     return;
-    // }
-    // if (verifyHmac(&hmac, /*drm except wav md and hmac*/, /*datalen*/, hash, /*get_drm_hmac*/) != 0) {
-    //     mb_printf("Cannot share song\r\n");
-    //     return;
-    // }
 
     // prevent integer overflow -- simple alternative to hash map
     if (s.song_md.num_users >= MAX_USERS) {
@@ -427,6 +408,19 @@ void share_song() {
         c->song.wav_size = 0;
         return;
     }
+    
+    // verify metadata HMAC
+    /*memcpy(mdHmac, (void *)(c->song.mdHmac), HMAC_SZ);
+    mb_printf("Verifying Audio File...");
+    char* data[1];
+    data[0] = c->song.iv;
+    int dataLens[1];
+    dataLens[0] = all_md_len;
+    if (verifyHmac(s.hmacMdKey, HMAC_MD_KEY_SZ, 1, data, dataLens, mdHmac) != 0) {
+        mb_printf("Failed to play audio");
+        return;
+    }
+    mb_printf("Successfully Verified Audio File");*/
     
     // generate new song metadata
     s.song_md.uids[s.song_md.num_users++] = uid;
@@ -494,11 +488,12 @@ void play_song() {
     memcpy(iv, (void *)c->song.iv, AES_BLK_SZ);
     // stack size MUST be increased to fit this (default is 1KB)
     char plainChunk[CHUNK_SZ]; // current decrypted chunk
-    char eChunkIv[CHUNK_SZ+AES_BLK_SZ];
     int chunk = 0;
 
     rem = lenAudio;
     fifo_fill = (u32 *)XPAR_FIFO_COUNT_AXI_GPIO_0_BASEADDR;
+    
+    char paused = FALSE;
 
     // write entire file to two-block codec fifo
     // writes to one block while the other is being played
@@ -512,6 +507,7 @@ void play_song() {
             case PAUSE:
                 mb_printf("Pausing... \r\n");
                 set_paused();
+                paused = TRUE;
                 while (!InterruptProcessed) continue; // wait for interrupt
                 break;
             case PLAY:
@@ -523,6 +519,7 @@ void play_song() {
                 return;
             case RESTART:
                 mb_printf("Restarting song... \r\n");
+                usleep(100000); // prevent choppy audio on restart
                 chunk = 0;
                 rem = lenAudio; // reset song counter
                 firstChunk = TRUE;
@@ -545,7 +542,7 @@ void play_song() {
         }
 
         // verify chunk using HMAC
-        char* data2[2];
+        /*char* data2[2];
         data2[0] = get_drm_song(c->song) + lenAudio - rem;
         data2[1] = c->song.iv;
         int dataLens2[2];
@@ -554,7 +551,7 @@ void play_song() {
         if (verifyHmac(s.hmacChunkKey, HMAC_CHUNK_KEY_SZ, 2, data2, dataLens2, get_drm_hmac(c->song, chunk++)) != 0) {
             mb_printf("Failed to play audio");
             return;
-        }
+        }*/
 
         // decrypt chunk
         ret = wc_AesCbcDecryptWithKey((byte*)plainChunk, (void*)(get_drm_song(c->song) + lenAudio - rem), cp_num, (byte*)s.aesKey, (word32)AES_KEY_SZ, (byte*)iv);
@@ -564,9 +561,9 @@ void play_song() {
         }
 
         // if last chunk unpad using PKCS#7
-        if (counter == nchunks) {
+        if (chunk == nchunks) {
             unsigned int pads = (unsigned int*)plainChunk[cp_num-1];
-            if (pads > 16 || pads == 0) {
+            if (pads == 0 || pads > 16) {
                 mb_printf("Failed to play audio");
                 return;
             }
@@ -590,6 +587,7 @@ void play_song() {
         cp_xfil_cnt = cp_num;
 
         while (cp_xfil_cnt > 0) {
+            //mb_printf("rem %u, cp_num %u, cp_xfil_cnt %u offset %u, fifofill %u", rem, cp_num, cp_xfil_cnt, offset, *fifo_fill);
             // polling while loop to wait for DMA to be ready
             // DMA must run first for this to yield the proper state
             // rem != lenAudio checks for first run
@@ -600,6 +598,12 @@ void play_song() {
             dma_cnt = (FIFO_CAP - *fifo_fill > cp_xfil_cnt)
                       ? FIFO_CAP - *fifo_fill
                       : cp_xfil_cnt;
+            // prevents choppy audio when resuming from pause
+            if (paused) {
+                dma_cnt = cp_xfil_cnt;
+                paused = FALSE;
+            }
+            //mb_printf("%u", dma_cnt);
             fnAudioPlay(sAxiDma, offset, dma_cnt);
             cp_xfil_cnt -= dma_cnt;
         }
@@ -716,13 +720,11 @@ int main() {
             }
 
             // reset statuses and sleep to allowe player to recognize WORKING state
-            //strcpy((char *)c->username, s.username);
-            //c->login_status = s.logged_in;
             usleep(500);
             set_stopped();
         }
     }
-
+    mb_printf("AAAAAAAAAA");
     // WolfCrypt cleanup */
     if (wolfCrypt_Cleanup() != 0) {
         mb_printf("Error in wolfCrypt_Cleanup\r\n");

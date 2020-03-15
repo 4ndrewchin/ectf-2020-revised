@@ -23,13 +23,14 @@
 #define mb_printf(...) xil_printf(MB_PROMPT __VA_ARGS__)
 
 // protocol constants
-#define MAX_REGIONS 64
+#define MAX_REGIONS 32
 #define REGION_NAME_SZ 64
 #define MAX_USERS 64
 #define USERNAME_SZ 64
 #define MAX_PIN_SZ 64
 #define MAX_SONG_SZ (1<<25)
 #define HMAC_SZ 32
+#define MAX_MD_SZ 100
 
 
 // LED colors and controller
@@ -95,8 +96,7 @@ enum states   { STOPPED, WORKING, PLAYING, PAUSED };
 typedef volatile struct __attribute__((__packed__)) {
     char cmd;                   // from commands enum
     char drm_state;             // from states enum
-    char login_status;          // 0 = logged off, 1 = logged on
-    char padding;               // not used
+    char padding[2];            // unused
     char username[USERNAME_SZ]; // stores logged in or attempted username
     char pin[MAX_PIN_SZ];       // stores logged in or attempted pin
 

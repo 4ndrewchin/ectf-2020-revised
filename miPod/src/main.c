@@ -110,7 +110,7 @@ void login(char *username, char *pin) {
     strcpy((void*)c->pin, pin);
     send_command(LOGIN);
     while (c->drm_state == STOPPED) continue; // wait for DRM to start working
-    while (c->drm_state == WORKING) continue; // wait for DRM to finishk
+    while (c->drm_state == WORKING) continue; // wait for DRM to finish working
 }
 
 
@@ -130,6 +130,8 @@ void query_player() {
     while (c->drm_state == WORKING) continue; // wait for DRM to dump file
 
     // print query results
+    mp_printf("Queried player (%d regions, %d users)\r\n", c->query.num_regions, c->query.num_users);
+
     mp_printf("Regions: %s", q_region_lookup(c->query, 0));
     for (int i = 1; i < c->query.num_regions; i++) {
         printf(", %s", q_region_lookup(c->query, i));
@@ -161,6 +163,7 @@ void query_song(char *song_name) {
     while (c->drm_state == WORKING) continue; // wait for DRM to finish
 
     // print query results
+    mp_printf("Queried song (%d regions, %d users)\r\n", c->query.num_regions, c->query.num_users);
 
     mp_printf("Regions: %s", q_region_lookup(c->query, 0));
     for (int i = 1; i < c->query.num_regions; i++) {
@@ -282,7 +285,7 @@ int play_song(char *song_name) {
             break;
         } else if (!strcmp(cmd, "restart")) {
             send_command(RESTART);
-        } else if (!strcmp(cmd, "exit")) {
+        } else if (!strcmp(cmd, "exit") || !strcmp(cmd, "quit")) {
             mp_printf("Exiting...\r\n");
             send_command(STOP);
             return -1;
