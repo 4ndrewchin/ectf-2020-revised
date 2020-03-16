@@ -80,7 +80,8 @@ def unprotect(infile, outfile, aeskey_f, hmacMdKeyFile, hmacChunkKeyFile):
    intAudioLength = int.from_bytes(audio_length, byteorder='little', signed=False)
 
    # get length of meta data
-   meta_data_len = data[end_iv+8] # first byte of md is len
+   # metadata is now ALWAYS 100 bytes
+   meta_data_len = 100#data[end_iv+8] # first byte of md is len
 
    # get meta data
    end_meta_data = end_iv+8+meta_data_len
