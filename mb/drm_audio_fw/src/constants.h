@@ -56,7 +56,8 @@ typedef struct {
 
 
 // struct to interpret drm metadata
-// max size = (1 + 1 + 1 + 1) + 32 max regions + 64 max users = 100 B
+// max size = (1 + 1 + 1 + 1) + 32 max regions + 
+// 63 max users not including owner + 1 for alignment = 100 B
 typedef struct __attribute__((__packed__)) {
     char md_size;
     char owner_id;

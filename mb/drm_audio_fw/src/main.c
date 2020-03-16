@@ -465,7 +465,9 @@ void share_song() {
     }
     
     // update song metadata
+    s.song_md.md_size++;
     s.song_md.uids[s.song_md.num_users++] = uid;
+    c->song.md.md_size++;
     c->song.md.buf[s.song_md.num_regions + s.song_md.num_users] = uid;
 
     // update metadata HMAC
