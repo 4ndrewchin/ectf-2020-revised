@@ -468,11 +468,11 @@ void share_song() {
     s.song_md.md_size++;
     s.song_md.uids[s.song_md.num_users++] = uid;
     c->song.md.md_size++;
-    c->song.md.buf[s.song_md.num_regions + s.song_md.num_users] = uid;
+    c->song.md.buf[s.song_md.num_regions + c->song.md.num_users++] = uid;
 
     // update metadata HMAC
     char newMd[MD_SZ];
-    memcpy(newMd, c->song.md, MD_SZ);
+    memcpy(newMd, (char*)&c->song.md, MD_SZ);
     char newHmac[HMAC_SZ];
     if (create_hmac(newHmac, newMd) != 0) {
         mb_printf("Cannot share song\r\n");
