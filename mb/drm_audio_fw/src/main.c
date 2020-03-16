@@ -157,7 +157,6 @@ void load_song_md() {
     s.song_md.num_users = c->song.md.num_users;
     memcpy(s.song_md.rids, (void *)get_drm_rids(c->song), s.song_md.num_regions);
     memcpy(s.song_md.uids, (void *)get_drm_uids(c->song), s.song_md.num_users);
-    // TODO: CHECKSUM VERIFY FOR INTEGRITY
 }
 
 
@@ -208,9 +207,10 @@ int is_locked() {
 }
 
 
-// copy the local song metadata into buf in the correct format
-// returns the size of the metadata in buf (including the metadata size field)
-// song metadata should be loaded before call
+/* copy the local song metadata into buf in the correct format
+ * returns the size of the metadata in buf (including the metadata size field)
+ * song metadata should be loaded before call
+ */
 int gen_song_md(char *buf) {
     buf[0] = ((5 + s.song_md.num_regions + s.song_md.num_users) / 2) * 2; // account for parity
     buf[1] = s.song_md.owner_id;
@@ -226,8 +226,8 @@ int gen_song_md(char *buf) {
 // takes the base64 encoded cryptographic keys from the secrets header and
 // decodes them for use
 // copy decoded keys into local internal state
-// return 0 on success
-int initCryptoKeys() {
+// return 0 on success, -1 otherwise
+int init_cryptkeys() {
     word32 outLen = b64AES_KEY_SZ;
     if (Base64_Decode((void *)AES_KEY, (word32)b64AES_KEY_SZ, (void *)s.aesKey, &outLen) != 0) {
         return -1;
@@ -243,8 +243,27 @@ int initCryptoKeys() {
     return 0;
 }
 
+/* verify song metadata using the HMAC
+ * returns 0 on success, -1 otherwise
+ */
+int verify_song() {
+    char mdHmac[HMAC_SZ];
+    memcpy(mdHmac, (void *)(c->song.mdHmac), HMAC_SZ);
+    u32 all_md_len = AES_BLK_SZ + sizeof(int)*2 + c->song.md.md_size;
 
-/* create HMAC using data and key and compare to DRM HMAC
+    mb_printf("Verifying Audio File...");
+    char* data[1];
+    data[0] = c->song.iv;
+    int dataLens[1];
+    dataLens[0] = all_md_len;
+    if (verify_hmac(s.hmacMdKey, HMAC_MD_KEY_SZ, 1, data, dataLens, mdHmac) != 0) {
+        return -1;
+    }
+    mb_printf("Successfully Verified Audio File");
+    return 0;
+}
+
+/* compute HMAC using data and key and compare to DRM HMAC
  * return 0 on success, -1 otherwise
  *
  * key      : HMAC key
@@ -254,8 +273,8 @@ int initCryptoKeys() {
  * dataLens : length of each data to be included in hash
  * drmHmac  : HMAC to compare computed HMAC to
  */
-int verifyHmac(char* key, int keyLen, int args, char* data[], int dataLens[], char* drmHmac) {
-    if (key == NULL || keyLen <= 0 || args <= 0 || data == NULL || dataLens == NULL || drmHmac == NULL) {
+int verify_hmac(char* key, int keyLen, int args, char* data[], int dataLens[], char* orig) {
+    if (key == NULL || keyLen <= 0 || args <= 0 || data == NULL || dataLens == NULL || orig == NULL) {
         return -1;
     }
     Hmac hmac;
@@ -273,15 +292,35 @@ int verifyHmac(char* key, int keyLen, int args, char* data[], int dataLens[], ch
     if (wc_HmacFinal(&hmac, hash) != 0) {
         return -1;
     }
-    if (memcmp(hash, (void *)drmHmac, HMAC_SZ) != 0) {
+    if (memcmp(hash, (void *)orig, HMAC_SZ) != 0) {
         return -1;
     }
     return 0;
 }
 
+/* create a new metadata HMAC from [AES IV + num chunks + enc audio len + song MD]
+ * return 0 on success, -1 otherwise
+ * 
+ * out      : pointer to buffer to store created hash
+ * new_md   : pointer to newley generated metadata
+ */
+int create_hmac(char* out, char* new_md) {
+    Hmac hmac;
+    if (wc_HmacSetKey(&hmac, SHA256, s.hmacMdKey, HMAC_MD_KEY_SZ) != 0) {
+        return -1;
+    }
 
-int updateHmac(Hmac *hmac) {
-    // TODO
+    char* data[4] = {c->song.iv, c->song.iv+AES_BLK_SZ, c->song.iv+AES_BLK_SZ+sizeof(int), new_md};
+    int lens[4] = {AES_BLK_SZ, sizeof(int), sizeof(int), (int)new_md[0]};
+
+    for (int i = 0; i < 4; i++) {
+        if (wc_HmacUpdate(&hmac, (void *)data[i], lens[i]) != 0) {
+            return -1;
+        }
+    }
+    if (wc_HmacFinal(&hmac, out) != 0) {
+        return -1;
+    }
     return 0;
 }
 
@@ -356,7 +395,12 @@ void query_player() {
 void query_song() {
     char *name;
 
-    // load song
+    // verify and load song md
+    if (verify_song() != 0) {
+        mb_printf("Cannot query song\r\n");
+        c->query.num_regions = 0;
+        return;
+    }
     load_song_md();
     memset((void *)&c->query, 0, sizeof(query));
 
@@ -384,15 +428,21 @@ void query_song() {
 // add a user to the song's list of users
 void share_song() {
     int new_md_len, shift;
-    char new_md[MAX_MD_SZ], mdHmac[HMAC_SZ], uid;
+    char new_md[MAX_MD_SZ], uid;
 
     // reject non-owner attempts to share
-    load_song_md();
     if (!s.logged_in) {
         mb_printf("No user is logged in. Cannot share song\r\n");
         c->song.wav_size = 0;
         return;
-    } else if (s.uid != s.song_md.owner_id) {
+    }
+    if (verify_song() != 0) {
+        mb_printf("Cannot share song\r\n");
+        c->song.wav_size = 0;
+        return;
+    }
+    load_song_md();
+    if (s.uid != s.song_md.owner_id) {
         mb_printf("User '%s' is not song's owner. Cannot share song\r\n", s.username);
         c->song.wav_size = 0;
         return;
@@ -402,25 +452,15 @@ void share_song() {
         return;
     }
 
-    // prevent integer overflow -- simple alternative to hash map
+    // only allow MAX_USERS shares -- much simpler alternative to hash map
+    // a song owner may share a song with one user 64 times and
+    // prevent it from being shared with anybody else; however,
+    // we can no longer overflow s.song_md.num_users
     if (s.song_md.num_users >= MAX_USERS) {
         mb_printf("Cannot share song\r\n");
         c->song.wav_size = 0;
         return;
     }
-    
-    // verify metadata HMAC
-    /*memcpy(mdHmac, (void *)(c->song.mdHmac), HMAC_SZ);
-    mb_printf("Verifying Audio File...");
-    char* data[1];
-    data[0] = c->song.iv;
-    int dataLens[1];
-    dataLens[0] = all_md_len;
-    if (verifyHmac(s.hmacMdKey, HMAC_MD_KEY_SZ, 1, data, dataLens, mdHmac) != 0) {
-        mb_printf("Failed to play audio");
-        return;
-    }
-    mb_printf("Successfully Verified Audio File");*/
     
     // generate new song metadata
     s.song_md.uids[s.song_md.num_users++] = uid;
@@ -428,15 +468,19 @@ void share_song() {
     shift = new_md_len - s.song_md.md_size;
 
     // update metadata HMAC
-    // if (updateHmac(&hmac) != 0) {
-    //     mb_printf("Cannot share song\r\n");
-    //     c->song.wav_size = 0;
-    //     return;
-    // }
+    char newHmac[HMAC_SZ];
+    if (create_hmac(newHmac, new_md) != 0) {
+        mb_printf("Cannot share song\r\n");
+        c->song.wav_size = 0;
+        return;
+    }
+    memcpy(c->song.mdHmac, newHmac, HMAC_SZ);
 
     // shift over song and add new metadata
+    // TODO: this takes a LONG time (>5 sec) -- is there an alternative?
     if (shift) {
-        memmove((void *)get_drm_song(c->song) + shift, (void *)get_drm_song(c->song), c->song.wav_size);
+        int audioHmacsLen = c->song.encAudioLen + c->song.numChunks * HMAC_SZ;
+        memmove((void *)get_drm_song(c->song) + shift, (void *)get_drm_song(c->song), audioHmacsLen);
     }
     memcpy((void *)&c->song.md, new_md, new_md_len);
 
@@ -450,29 +494,21 @@ void share_song() {
 
 // plays a song and looks for play-time commands
 void play_song() {
-    u32 counter = 0, rem, cp_num, cp_xfil_cnt, offset, dma_cnt, lenAudio, *fifo_fill, total_len, all_md_len;
+    u32 counter = 0, rem, cp_num, cp_xfil_cnt, offset, dma_cnt, lenAudio, *fifo_fill;
     int ret = -1;
     char mdHmac[HMAC_SZ];
     memcpy(mdHmac, (void *)(c->song.mdHmac), HMAC_SZ);
 
     mb_printf("Reading Audio File...");
-    load_song_md();
-
-    total_len = c->song.wav_size - HMAC_SZ;
-    lenAudio = c->song.encAudioLen;
-    all_md_len = 16 + sizeof(int)*2 + c->song.md.md_size;
-    unsigned int nchunks = c->song.numChunks;
-
-    mb_printf("Verifying Audio File...");
-    char* data[1];
-    data[0] = c->song.iv;
-    int dataLens[1];
-    dataLens[0] = all_md_len;
-    if (verifyHmac(s.hmacMdKey, HMAC_MD_KEY_SZ, 1, data, dataLens, mdHmac) != 0) {
+    // verify and load song md
+    if (verify_song() != 0) {
         mb_printf("Failed to play audio");
         return;
     }
-    mb_printf("Successfully Verified Audio File");
+    load_song_md();
+
+    lenAudio = c->song.encAudioLen;
+    unsigned int nchunks = c->song.numChunks;
 
     // truncate song if locked
     if (lenAudio > PREVIEW_SZ && is_locked()) {
@@ -542,16 +578,23 @@ void play_song() {
         }
 
         // verify chunk using HMAC
+        // TODO: why does audio skip when this is uncommented?
+        //       Initially I thought it was a speed issue, and indeed when I replace this
+        //       with sleep(), it also messed up the audio. However, upon inspecting the 
+        //       fifo values (*fifo_fill, cp_xfil_cnt, dma_cnt) during runtime, I noticed
+        //       that the values oscillate between weird values. You can uncomment the
+        //       mb_printf()'s in the fifo/DMA loop below
         /*char* data2[2];
         data2[0] = get_drm_song(c->song) + lenAudio - rem;
         data2[1] = c->song.iv;
         int dataLens2[2];
         dataLens2[0] = cp_num;
         dataLens2[1] = AES_BLK_SZ;
-        if (verifyHmac(s.hmacChunkKey, HMAC_CHUNK_KEY_SZ, 2, data2, dataLens2, get_drm_hmac(c->song, chunk++)) != 0) {
+        if (verify_hmac(s.hmacChunkKey, HMAC_CHUNK_KEY_SZ, 2, data2, dataLens2, get_drm_hmac(c->song, chunk++)) != 0) {
             mb_printf("Failed to play audio");
             return;
         }*/
+        chunk++; // DELETE THIS LINE WHEN UNCOMMENTING ABOVE
 
         // decrypt chunk
         ret = wc_AesCbcDecryptWithKey((byte*)plainChunk, (void*)(get_drm_song(c->song) + lenAudio - rem), cp_num, (byte*)s.aesKey, (word32)AES_KEY_SZ, (byte*)iv);
@@ -614,7 +657,7 @@ void play_song() {
 
 
 // removes DRM data from song for digital out
-// TODO
+// TODO: I haven't touched this function at all
 void digital_out() {
     // remove metadata size from file and chunk sizes
     c->song.file_size -= c->song.md.md_size;
@@ -679,7 +722,7 @@ int main() {
     }
 
     // initialize crypto keys
-    if (initCryptoKeys() != 0) {
+    if (init_cryptkeys() != 0) {
         mb_printf("Error initializing keys\r\n");
         return XST_FAILURE;
     }

@@ -160,9 +160,15 @@ void query_song(char *song_name) {
     // drive DRM
     send_command(QUERY_SONG);
     while (c->drm_state == STOPPED) continue; // wait for DRM to start working
-    while (c->drm_state == WORKING) continue; // wait for DRM to finish
+    while (c->drm_state == WORKING) continue; // wait for DRM to dump file
+
+    // query failed
+    if (c->query.num_regions == 0) {
+        return;
+    }
 
     // print query results
+    printf("\r\n");
     mp_printf("Queried song (%d regions, %d users)\r\n", c->query.num_regions, c->query.num_users);
 
     mp_printf("Regions: %s", q_region_lookup(c->query, 0));
@@ -191,9 +197,10 @@ void share_song(char *song_name, char *username) {
     unsigned int length;
     ssize_t wrote, written = 0;
 
-    if (!username) {
+    if (!song_name || !username) {
         mp_printf("Need song name and username\r\n");
         print_help();
+        return;
     }
 
     // load the song into the shared buffer

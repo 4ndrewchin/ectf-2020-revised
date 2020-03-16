@@ -69,11 +69,11 @@ typedef struct __attribute__((__packed__)) {
 // packing values skip over non-relevant WAV metadata
 typedef struct __attribute__((__packed__)) {
     char packing1[4];
-    u32 file_size;
+    u32 file_size;          // size of entire wav file
     char packing2[32];
-    u32 wav_size;
+    u32 wav_size;           // size of file not including wav md
     char mdHmac[HMAC_SZ];
-    unsigned char iv[16]; // AES initialization vector
+    unsigned char iv[16];   // AES initialization vector
     unsigned int numChunks;
     unsigned int encAudioLen;
     drm_md md;
