@@ -330,6 +330,10 @@ void digital_out(char *song_name) {
     while (c->drm_state == STOPPED) continue; // wait for DRM to start working
     while (c->drm_state == WORKING) continue; // wait for DRM to dump file
 
+    if (c->song.wav_size == 0) {
+        return;
+    }
+
     // open digital output file
     int written = 0, wrote, length = c->song.file_size + 8;
     sprintf(fname, "%s.dout", song_name);

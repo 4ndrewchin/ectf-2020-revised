@@ -198,7 +198,7 @@ int is_locked() {
         }
 
         if (!locked) {
-            mb_printf("Region Match. Full Song can be played. Unlocking...");
+            mb_printf("Region Match. Full Song can be accessed. Unlocking...");
         } else {
             mb_printf("Invalid region");
         }
@@ -650,21 +650,42 @@ void play_song() {
 
 
 // removes DRM data from song for digital out
-// TODO: I haven't touched this function at all
 void digital_out() {
+    char uid;
+
+    if (verify_song() != 0) {
+        mb_printf("Cannot dump song\r\n");
+        c->song.wav_size = 0;
+        return;
+    }
+    load_song_md();
+
     // remove metadata size from file and chunk sizes
-    c->song.file_size -= c->song.md.md_size;
-    c->song.wav_size -= c->song.md.md_size;
+    unsigned int all_md_len = HMAC_SZ + AES_BLK_SZ + sizeof(int)*2 + MD_SZ + c->song.numChunks*HMAC_SZ;
+    c->song.file_size -= all_md_len;
+    c->song.wav_size -= all_md_len;
 
     if (is_locked() && PREVIEW_SZ < c->song.wav_size) {
-        mb_printf("Only playing 30 seconds");
+        mb_printf("Only dumping 30 seconds");
         c->song.file_size -= c->song.wav_size - PREVIEW_SZ;
         c->song.wav_size = PREVIEW_SZ;
     }
 
+    // decrypt song in-place
+    // TODO: how to verify audio?
+    mb_printf(MB_PROMPT "Decrypting song (%dB)...", c->song.wav_size);
+    int ret = wc_AesCbcDecryptWithKey((void*)get_drm_song(c->song), (void*)get_drm_song(c->song), c->song.wav_size, (void*)s.aesKey, (word32)AES_KEY_SZ, (void*)c->song.iv);
+    if (ret != 0) {
+        mb_printf("Failed to dump song");
+        return;
+    }
+
     // move WAV file up in buffer, skipping metadata
+    char padding = get_drm_song(c->song)[c->song.encAudioLen-1];
+    c->song.wav_size -= (int)padding;
+
     mb_printf(MB_PROMPT "Dumping song (%dB)...", c->song.wav_size);
-    memmove((void *)&c->song.md, (void *)get_drm_song(c->song), c->song.wav_size);
+    memmove((void *)&c->song.mdHmac, (void *)get_drm_song(c->song), c->song.wav_size);
 
     mb_printf("Song dump finished\r\n");
 }

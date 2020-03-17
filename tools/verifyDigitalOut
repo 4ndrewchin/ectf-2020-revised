@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""
+Description: Verify digital_out songs
+"""
+
+import wave
+from argparse import ArgumentParser
+
+parser = ArgumentParser(description='verify digital_out songs')
+parser.add_argument('--wav', help='path to original wav', required=True)
+parser.add_argument('--dout', help='path to digital_out dout', required=True)
+args = parser.parse_args()
+
+original_file = args.wav
+dout_file = args.dout
+
+true_song = wave.open(original_file, 'r')
+true_samples = true_song.readframes(true_song.getnframes())
+
+try:
+    # try to interpret as wav file
+    dout_song = wave.open(dout_file, 'r')
+    dout_samples = dout_song.readframes(dout_song.getnframes())
+except wave.Error:
+    # otherwise intepret as a file with raw samples
+    with open(dout_file, 'rb') as f:
+        dout_samples = f.read()
+print('dout_samples: ',len(dout_samples))
+print('true_samples: ',len(true_samples))
+assert(dout_samples == true_samples)
+print('digital_out SUCCESSFUL')
