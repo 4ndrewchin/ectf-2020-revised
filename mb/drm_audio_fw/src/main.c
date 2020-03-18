@@ -651,8 +651,6 @@ void play_song() {
 
 // removes DRM data from song for digital out
 void digital_out() {
-    char uid;
-
     if (verify_song() != 0) {
         mb_printf("Cannot dump song\r\n");
         c->song.wav_size = 0;
@@ -671,20 +669,88 @@ void digital_out() {
         c->song.wav_size = PREVIEW_SZ;
     }
 
+    mb_printf("Decrypting song (%dB)...", c->song.wav_size);
+    //==================taken from play_song===========================================
+    int ret;
+    unsigned int lenAudio = c->song.wav_size;
+    unsigned int nchunks = c->song.numChunks;
+
+    char plainChunk[CHUNK_SZ]; 
+    unsigned char iv[AES_BLK_SZ];
+    memcpy(iv, (void *)c->song.iv, AES_BLK_SZ);
+    int chunknum = 0;
+
+    int rem = lenAudio;
+    unsigned int cp_num;
+
+    // decrypt and verify chunks of encrypted audio
+    while(rem > 0) {
+        // calculate write size and offset
+        cp_num = (rem > CHUNK_SZ) ? CHUNK_SZ : rem;
+
+        // verify chunk using HMAC
+        /*char* data2[2];
+        data2[0] = get_drm_song(c->song) + lenAudio - rem;
+        data2[1] = c->song.iv;
+        int dataLens2[2];
+        dataLens2[0] = cp_num;
+        dataLens2[1] = AES_BLK_SZ;
+        if (verify_hmac(s.hmacChunkKey, HMAC_CHUNK_KEY_SZ, 2, data2, dataLens2, get_drm_hmac(c->song, chunknum++)) != 0) {
+            mb_printf("Failed to dump song");
+            c->song.wav_size = 0;
+            return;
+        }*/chunknum++;
+
+        // decrypt chunk
+        ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, (void*)s.aesKey, (word32)AES_KEY_SZ, iv);
+        if (ret != 0) {
+            mb_printf("Failed to dump song");
+            return;
+        }
+
+        // get next IV before replacing encrypted chunk with decrypted chunk
+        memcpy(iv, (void *)(get_drm_song(c->song) + lenAudio - rem + cp_num - AES_BLK_SZ), AES_BLK_SZ);
+        memcpy((get_drm_song(c->song) + lenAudio - rem), plainChunk, CHUNK_SZ);
+
+        // if last chunk unpad using PKCS#7
+        if (chunknum == nchunks) {
+            unsigned int pads = (unsigned int*)(get_drm_song(c->song) + lenAudio - rem)[cp_num-1];
+            if (pads == 0 || pads > 16) {
+                mb_printf("Failed to dump song");
+                return;
+            }
+            for (int i = 1; i <= pads; i++) {
+                unsigned int bite = (unsigned int*)(get_drm_song(c->song) + lenAudio - rem)[cp_num-i];
+                if (bite != pads) {
+                    mb_printf("Failed to dump song");
+                    return;
+                }
+            }
+            c->song.wav_size -= pads;
+            c->song.file_size -= pads;
+        }
+        rem -= cp_num;
+    }
+    //====================================================================================
+
     // decrypt song in-place
     // TODO: how to verify audio?
-    mb_printf(MB_PROMPT "Decrypting song (%dB)...", c->song.wav_size);
+    /*mb_printf("Decrypting song (%dB)...", c->song.wav_size);
     int ret = wc_AesCbcDecryptWithKey((void*)get_drm_song(c->song), (void*)get_drm_song(c->song), c->song.wav_size, (void*)s.aesKey, (word32)AES_KEY_SZ, (void*)c->song.iv);
     if (ret != 0) {
         mb_printf("Failed to dump song");
         return;
-    }
+    }*/
+
+    // remove padding if needed
+    /*if (!cut) {
+        char padding = get_drm_song(c->song)[c->song.encAudioLen-1];
+        c->song.wav_size -= (int)padding;
+        mb_printf("padding %d", (int)padding);
+    }*/
 
     // move WAV file up in buffer, skipping metadata
-    char padding = get_drm_song(c->song)[c->song.encAudioLen-1];
-    c->song.wav_size -= (int)padding;
-
-    mb_printf(MB_PROMPT "Dumping song (%dB)...", c->song.wav_size);
+    mb_printf("Dumping song (%dB)...", c->song.wav_size);
     memmove((void *)&c->song.mdHmac, (void *)get_drm_song(c->song), c->song.wav_size);
 
     mb_printf("Song dump finished\r\n");

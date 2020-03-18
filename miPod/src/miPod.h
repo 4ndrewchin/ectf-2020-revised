@@ -20,6 +20,7 @@
 #define MAX_PIN_SZ 64
 #define MAX_SONG_SZ (1<<25)
 #define HMAC_SZ 32
+#define MD_SZ 100
 
 // printing utility
 #define MP_PROMPT "mP> "
