@@ -487,8 +487,8 @@ void share_song() {
 
 // plays a song and looks for play-time commands
 void play_song() {
-    u32 counter = 0, rem, cp_num, cp_xfil_cnt, offset, dma_cnt, lenAudio, *fifo_fill;
-    int ret = -1;
+    u32 counter = 0, cp_num, cp_xfil_cnt, offset, dma_cnt, lenAudio, *fifo_fill;
+    int ret, rem; // we need rem to be signed so we can check if under 0
     char mdHmac[HMAC_SZ];
     memcpy(mdHmac, (void *)(c->song.mdHmac), HMAC_SZ);
 
@@ -553,6 +553,31 @@ void play_song() {
                 rem = lenAudio; // reset song counter
                 firstChunk = TRUE;
                 set_playing();
+                break;
+            case FF:
+                mb_printf("Fast forwarding 5 seconds... \r\n");
+                paused = TRUE;
+                rem -= SKIP_SZ;
+                if (rem <= 0) {
+                    return;
+                }
+                chunknum += (SKIP_SZ / CHUNK_SZ);
+                // TODO: can we overshoot chunknum? i.e. find ourselves in
+                // a scenario where last chunk is not unpadded?
+                break;
+            case RW:
+                paused = TRUE;
+                mb_printf("Rewinding 5 seconds... \r\n");
+                rem += SKIP_SZ;
+                if (rem > lenAudio) {
+                    usleep(100000); // prevent choppy audio on restart
+                    rem = lenAudio;
+                    firstChunk = TRUE;
+                }
+                chunknum -= (SKIP_SZ / CHUNK_SZ);
+                if (chunknum < 0) {
+                    chunknum = 0;
+                }
             default:
                 break;
             }

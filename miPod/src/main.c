@@ -63,8 +63,8 @@ void print_playback_help() {
     mp_printf("  pause: pause the song\r\n");
     mp_printf("  resume: resume the paused song\r\n");
     mp_printf("  restart: restart the song\r\n");
-    mp_printf("  ff: fast forwards 5 seconds(unsupported)\r\n");
-    mp_printf("  rw: rewind 5 seconds (unsupported)\r\n");
+    mp_printf("  ff: fast forwards 5 seconds\r\n");
+    mp_printf("  rw: rewind 5 seconds\r\n");
     mp_printf("  help: display this message\r\n");
 }
 
@@ -292,22 +292,19 @@ int play_song(char *song_name) {
             break;
         } else if (!strcmp(cmd, "restart")) {
             send_command(RESTART);
-        } else if (!strcmp(cmd, "exit") || !strcmp(cmd, "quit")) {
-            mp_printf("Exiting...\r\n");
-            send_command(STOP);
-            return -1;
+            usleep(200000); // wait for DRM to print
         } else if (!strcmp(cmd, "rw")) {
-            mp_printf("Unsupported feature.\r\n\r\n");
-            print_playback_help();
+            send_command(RW);
+            usleep(200000); // wait for DRM to print
         } else if (!strcmp(cmd, "ff")) {
+            send_command(FF);
+            usleep(200000); // wait for DRM to print
+        }/* else if (!strcmp(cmd, "lyrics")) {
             mp_printf("Unsupported feature.\r\n\r\n");
             print_playback_help();
-        } else if (!strcmp(cmd, "lyrics")) {
-            mp_printf("Unsupported feature.\r\n\r\n");
-            print_playback_help();
-        } else {
-            mp_printf("Unrecognized command.\r\n\r\n");
-            print_playback_help();
+        } */else {
+            mp_printf("Unrecognized command. Try 'help'.\r\n\r\n");
+            //print_playback_help();
         }
     }
 
@@ -407,12 +404,12 @@ int main(int argc, char** argv)
             digital_out(arg1);
         } else if (!strcmp(cmd, "share")) {
             share_song(arg1, arg2);
-        } else if (!strcmp(cmd, "exit")) {
+        } else if (!strcmp(cmd, "exit") || !strcmp(cmd, "quit")) {
             mp_printf("Exiting...\r\n");
             break;
         } else {
-            mp_printf("Unrecognized command.\r\n\r\n");
-            print_help();
+            mp_printf("Unrecognized command. Try 'help'.\r\n\r\n");
+            //print_help();
         }
     }
 

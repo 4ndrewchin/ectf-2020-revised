@@ -12,11 +12,13 @@
 
 // number of seconds to record/playback
 #define PREVIEW_TIME_SEC 30
+#define SKIP_TIME_SEC 5
 
 // ADC/DAC sampling rate in Hz
 #define AUDIO_SAMPLING_RATE 48000
 #define BYTES_PER_SAMP 2
 #define PREVIEW_SZ (PREVIEW_TIME_SEC * AUDIO_SAMPLING_RATE * BYTES_PER_SAMP)
+#define SKIP_SZ (SKIP_TIME_SEC * AUDIO_SAMPLING_RATE * BYTES_PER_SAMP)
 
 // printing utility
 #define MB_PROMPT "\r\nMB> "
