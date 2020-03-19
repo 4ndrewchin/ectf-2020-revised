@@ -149,7 +149,7 @@ int username_to_uid(char *username, char *uid, int provisioned_only) {
 }
 
 
-// loads the song metadata in the shared buffer into the local struct
+// loads the song metadata in the shared buffer into the local internal_state struct
 void load_song_md() {
     s.song_md.md_size = c->song.md.md_size;
     s.song_md.owner_id = c->song.md.owner_id;
@@ -160,8 +160,10 @@ void load_song_md() {
 }
 
 
-// checks if the song loaded into the shared buffer is locked for the current user
-// assume we have already loaded song metadata (load_song_md())
+/* checks if the song loaded into the shared buffer is locked for the current user
+ * assume we have already loaded song metadata (load_song_md())
+ * return TRUE (1) if song is locked for current user and/or region, FALSE (0) otherwise
+ */
 int is_locked() {
     int locked = TRUE;
 
@@ -203,13 +205,13 @@ int is_locked() {
         }
     }
     return locked;
-}
+} // end is_locked()
 
 
-// takes the base64 encoded cryptographic keys from the secrets header and
-// decodes them for use
-// copy decoded keys into local internal state
-// return 0 on success, -1 otherwise
+/* takes the base64 encoded cryptographic keys from secrets.h, decodes them, and
+ * stores them into the DRM local internal_state struct
+ * return 0 on success, -1 otherwise
+ */
 int init_cryptkeys() {
     word32 outLen = b64AES_KEY_SZ;
     if (Base64_Decode((void *)AES_KEY, (word32)b64AES_KEY_SZ, (void *)s.aesKey, &outLen) != 0) {
@@ -263,7 +265,7 @@ int verify_hmac(char* key, int keyLen, int args, char* data[], int dataLens[], c
 }
 
 
-/* verify song metadata using the HMAC
+/* verify song metadata using the metadata HMAC from the song in the shared buffer
  * returns 0 on success, -1 otherwise
  */
 int verify_song() {
@@ -285,10 +287,11 @@ int verify_song() {
 }
 
 
-/* create a new metadata HMAC from [AES IV + num chunks + enc audio len + song MD]
+/* update the metadata HMAC for a song in the shared memory
+ * HMAC uses [AES IV + num chunks + enc audio len + song MD]
  * return 0 on success, -1 otherwise
  * 
- * out      : pointer to buffer to store created hash
+ * out      : pointer to buffer to store created hmac
  * new_md   : pointer to newly generated metadata
  */
 int create_hmac(char* out, char* new_md) {
@@ -301,7 +304,6 @@ int create_hmac(char* out, char* new_md) {
     }
 
     char* ptrIv = c->song.iv;
-
     char* data[4] = { ptrIv, ptrIv+AES_BLK_SZ, ptrIv+AES_BLK_SZ+sizeof(int), new_md };
     int lens[4] = { AES_BLK_SZ, sizeof(int), sizeof(int), MD_SZ };
 
@@ -329,6 +331,7 @@ void login() {
     if (s.logged_in) {
         mb_printf("Already logged in. Please log out first.\r\n");
     } else {
+        // TODO: modify provisioning tools to disallow duplicate usernames & IDs
         for (int i = 0; i < NUM_PROVISIONED_USERS; i++) {
             // search for matching username
             if (!strcmp(s.username, USERNAMES[PROVISIONED_UIDS[i]])) {
@@ -340,6 +343,7 @@ void login() {
                     mb_printf("Logged in for user '%s'\r\n", (void *)s.username);
                     return;
                 } else {
+                    // username exists, but password does not match
                     break;
                 }
             }
@@ -364,6 +368,8 @@ void logout() {
 
 
 // handles a request to query the player's metadata
+// copies results into shared memory for miPod to display
+// note: this is only called once per miPod boot
 void query_player() {
     c->query.num_regions = NUM_PROVISIONED_REGIONS;
     c->query.num_users = NUM_PROVISIONED_USERS;
@@ -379,6 +385,9 @@ void query_player() {
 
 
 // handles a request to query song metadata
+// just like query_song, results are copied into the shared memory for miPod
+// to display
+// on error, set c->query.num_regions = 0 to notify miPod
 void query_song() {
     char *name;
 
@@ -412,7 +421,8 @@ void query_song() {
 }
 
 
-// add a user to the song's list of users
+// add a user to the song's list of authorized users
+// on error, set c->song.wav_size = 0 to notify miPod
 void share_song() {
     char uid;
 
@@ -441,20 +451,22 @@ void share_song() {
     // only allow MAX_USERS shares -- much simpler alternative to hash map
     // a song owner may share a song with one user 64 times and
     // prevent it from being shared with anybody else; however,
-    // we can no longer overflow s.song_md.num_users
+    // we can no longer overflow s.song_md.num_users in line 463
     if (s.song_md.num_users >= MAX_USERS) {
         mb_printf("Cannot share song\r\n");
         c->song.wav_size = 0;
         return;
     }
     
-    // update song metadata
+    // update song metadata in local state
     s.song_md.md_size++;
     s.song_md.uids[s.song_md.num_users++] = uid;
+
+    // actually modify the file in the shared memory
     c->song.md.md_size++;
     c->song.md.buf[s.song_md.num_regions + c->song.md.num_users++] = uid;
 
-    // update metadata HMAC
+    // update metadata HMAC and copy it into the file in the shared memory
     char newMd[MD_SZ];
     memcpy(newMd, (char*)&c->song.md, MD_SZ);
     char newHmac[HMAC_SZ];
@@ -465,14 +477,27 @@ void share_song() {
     }
     memcpy(c->song.mdHmac, newHmac, HMAC_SZ);
 
+    // with a max of 32 different regions and 64 different users, the max size
+    // of the song metadata is 100 bytes. We preallocate 100 bytes for song metadata
+    // at drm file creation to remove the need for the expensive memmove() that
+    // used to be here
+
     mb_printf("Shared song with '%s'\r\n", c->username);
-}
+} // end share_song()
 
 
-// plays a song and looks for play-time commands
+// plays a song and enter the playback loop, which has it's own commands
+// if the metadata verification fails, set c->song.wav_size = 0 to notify DRM
+// if error occurs during playback, simply break out of the playback loop
 void play_song() {
     u32 counter = 0, cp_num, cp_xfil_cnt, offset, dma_cnt, lenAudio, *fifo_fill;
-    int ret, rem; // we need rem to be signed so we can check if under 0
+    // for function return values
+    int ret;
+    // rem is the bytes of audio remaining to play during the play loop
+    // we need rem to be signed so we can check if under 0
+    int rem;
+
+    // save a copy of the metadata HMAC
     char mdHmac[HMAC_SZ];
     memcpy(mdHmac, (void *)(c->song.mdHmac), HMAC_SZ);
 
@@ -498,13 +523,18 @@ void play_song() {
         mb_printf("Song is unlocked. Playing full song\r\n");
     }
 
-    int firstChunk = TRUE; // whether we are operating on the first chunk of the audio
-    char iv[AES_BLK_SZ];
+    // whether we are operating on the first chunk of the audio
+    int firstChunk = TRUE;
+    // save a copy of the initialization vector used for the AES-CBC encryption
     char origIv[AES_BLK_SZ];
-    memcpy(iv, c->song.iv, AES_BLK_SZ);
     memcpy(origIv, c->song.iv, AES_BLK_SZ);
-    // stack size MUST be increased to fit this (default is 1KB)
-    char plainChunk[CHUNK_SZ]; // current decrypted chunk
+    // buffer used to store current "IV" value -- we change this value after decrypting
+    // each audio chunk, but initially, it is the original initialization vector
+    char iv[AES_BLK_SZ];
+    memcpy(iv, c->song.iv, AES_BLK_SZ);
+    // buffer used to hold current decrypted audio chunk
+    char plainChunk[CHUNK_SZ];
+    // chunk number currently being decrypted
     int chunknum = 0;
 
     rem = lenAudio;
@@ -537,7 +567,7 @@ void play_song() {
             case RESTART:
                 mb_printf("Restarting song... \r\n");
                 usleep(100000); // prevent choppy audio on restart
-                chunknum = 0;
+                chunknum = 0; // reset chunk number
                 rem = lenAudio; // reset song counter
                 firstChunk = TRUE;
                 set_playing();
@@ -545,7 +575,8 @@ void play_song() {
             case FF:
                 mb_printf("Fast forwarding 5 seconds... \r\n");
                 paused = TRUE;
-                rem -= SKIP_SZ;
+                rem -= SKIP_SZ; // skip ahead
+                // if we try to skip past the end of the song/preview, end playback
                 if (rem <= 0) {
                     return;
                 }
@@ -556,7 +587,8 @@ void play_song() {
             case RW:
                 mb_printf("Rewinding 5 seconds... \r\n");
                 paused = TRUE;
-                rem += SKIP_SZ;
+                rem += SKIP_SZ; // rewind
+                // if we try to rewind past the beginning, play from the beginning
                 if (rem > lenAudio) {
                     usleep(100000); // prevent choppy audio on restart
                     rem = lenAudio;
@@ -575,8 +607,10 @@ void play_song() {
         cp_num = (rem > CHUNK_SZ) ? CHUNK_SZ : rem;
         offset = (counter++ % 2 == 0) ? 0 : CHUNK_SZ;
 
-        // if first chunk, grab the IV for decryption
-        // if not the first chunk, use the most previous block as the IV
+        // if first chunk, do nothing -- we have already copied the initialization
+        // vector into the iv buffer
+        // if not the first chunk, use the most previous AES block as the IV for the
+        // next chunk decryption
         if (firstChunk) {
             firstChunk = FALSE;
         } else {
@@ -605,6 +639,7 @@ void play_song() {
         // if last chunk unpad using PKCS#7
         if (chunknum == nchunks) {
             int pads = (int*)plainChunk[cp_num-1];
+            // terminate playback if padding is invalid
             if (pads == 0 || pads > 16) {
                 mb_printf("Failed to play audio\r\n");
                 return;
@@ -653,12 +688,16 @@ void play_song() {
         rem -= cp_num;
     } // end playback loop
 
+    xil_printf("\r\n");
     mb_printf("Done Playing Song. Press enter to continue.\r\n");
-    usleep(20000); // wait for print before notifying miPod
-}
+} // end play_song()
 
 
-// removes DRM data from song for digital out
+// decrypt song and remove metadata
+// miPod should be able to read the WAV metadata and the decrypted audio to
+// produce a dout file, an exact copy (aurally) of the original wav
+// on error, set c->song.wav_size = 0 to notify DRM
+// note: implementation mirrors play_song()
 void digital_out() {
     if (verify_song() != 0) {
         mb_printf("Cannot dump song\r\n");
@@ -667,20 +706,29 @@ void digital_out() {
     }
     load_song_md();
 
-    // save metadata locally
-    int file_size = c->song.file_size;
-    int wav_size = c->song.wav_size;
+    // save metadata locally so we don't depend on values in volatile shared memory
+    int file_size = c->song.file_size; // whole .drm file size
+    int wav_size = c->song.wav_size; // size not including WAV metadata
+    // number of encrypted chunks
     int nchunks = c->song.numChunks;
-    char iv[AES_BLK_SZ];
-    memcpy(iv, c->song.iv, AES_BLK_SZ);
+    // save a copy of the initialization vector used for the AES-CBC encryption
     char origIv[AES_BLK_SZ];
     memcpy(origIv, c->song.iv, AES_BLK_SZ);
+    // buffer used to store current "IV" value -- we change this value after decrypting
+    // each audio chunk, but initially, it is the original initialization vector
+    char iv[AES_BLK_SZ];
+    memcpy(iv, c->song.iv, AES_BLK_SZ);
+    // buffer used to hold current decrypted audio chunk
+    char plainChunk[CHUNK_SZ];
+    // chunk number currently being decrypted
+    int chunknum = 0;
 
-    // remove metadata size from file and chunk sizes
+    // remove all metadata size from file sizes to reflect audio only
     unsigned int all_md_len = HMAC_SZ + AES_BLK_SZ + sizeof(int)*2 + MD_SZ + nchunks*HMAC_SZ;
     file_size -= all_md_len;
     wav_size -= all_md_len;
 
+    // truncate song if locked
     if (is_locked() && PREVIEW_SZ < wav_size) {
         mb_printf("Only dumping 30 seconds\r\n");
         file_size -= wav_size - PREVIEW_SZ;
@@ -692,13 +740,10 @@ void digital_out() {
     int ret;
     unsigned int lenAudio = wav_size;
 
-    char plainChunk[CHUNK_SZ]; 
-    int chunknum = 0;
-
     int rem = lenAudio;
     unsigned int cp_num;
 
-    // decrypt and verify chunks of encrypted audio
+    // loop to decrypt and verify chunks of encrypted audio
     while(rem > 0) {
         // calculate write size and offset
         cp_num = (rem > CHUNK_SZ) ? CHUNK_SZ : rem;
@@ -731,6 +776,7 @@ void digital_out() {
         // if last chunk unpad using PKCS#7
         if (chunknum == nchunks) {
             int pads = (int*)(get_drm_song(c->song) + lenAudio - rem)[cp_num-1];
+            // terminate if invalid padding
             if (pads <= 0 || pads > 16) {
                 mb_printf("Failed to dump song\r\n");
                 c->song.wav_size = 0;
@@ -750,16 +796,16 @@ void digital_out() {
         rem -= cp_num;
     } // end decrypt loop
 
-    // move WAV file up in buffer, skipping metadata
+    // move WAV file up in buffer, to cover song metadata ("removing" it)
     mb_printf("Preparing song (%dB)...\r\n", wav_size);
     c->song.file_size = file_size;
     c->song.wav_size = wav_size;
     memmove(&c->song.mdHmac, get_drm_song(c->song), c->song.wav_size);
 
     mb_printf("Song dump finished\r\n");
-}
+} // end digital_out()
 
-// clear internal state on exit (but not cryptokeys)
+// clear internal state on exit (but not cryptokeys -- created once per board boot)
 void mb_exit() {
     int sz = sizeof(char) + sizeof(u8) + USERNAME_SZ + MAX_PIN_SZ + sizeof(song_md);
     memset((void*)&s, 0, sz);
@@ -853,7 +899,7 @@ int main() {
                 break;
             }
 
-            // reset statuses and sleep to allowe player to recognize WORKING state
+            // reset statuses and sleep to allow player to recognize WORKING state
             usleep(500);
             set_stopped();
         }
@@ -865,4 +911,4 @@ int main() {
     }
     cleanup_platform();
     return 0;
-}
+} // end main()

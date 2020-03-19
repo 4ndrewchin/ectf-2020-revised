@@ -36,6 +36,12 @@ extern "C" {
 #undef  NO_ERROR_STRINGS
 #define NO_ERROR_STRINGS
 
+#undef  NO_OLD_TLS
+#define NO_OLD_TLS
+
+#undef  WC_RSA_PSS
+#define WC_RSA_PSS
+
 #undef  NO_DH
 #define NO_DH
 
@@ -44,12 +50,6 @@ extern "C" {
 
 #undef  NO_MD5
 #define NO_MD5
-
-#undef  NO_OLD_TLS
-#define NO_OLD_TLS
-
-#undef  NO_SHA
-#define NO_SHA
 
 #undef  NO_OLD_TLS
 #define NO_OLD_TLS
@@ -65,9 +65,6 @@ extern "C" {
 
 #undef  NO_FILESYSTEM
 #define NO_FILESYSTEM
-
-#undef  HAVE_EXTENDED_MASTER
-#define HAVE_EXTENDED_MASTER
 
 #undef  HAVE_ENCRYPT_THEN_MAC
 #define HAVE_ENCRYPT_THEN_MAC

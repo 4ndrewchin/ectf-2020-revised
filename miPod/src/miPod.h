@@ -21,6 +21,7 @@
 #define MAX_SONG_SZ (1<<25)
 #define HMAC_SZ 32
 #define MD_SZ 100
+#define MAX_CMD_CHANNEL 33618764 // actual space needed for 32 MB song with our file format and cmd_channel struct
 
 // printing utility
 #define MP_PROMPT "mP> "
@@ -30,6 +31,7 @@
 #define print_prompt() printf(USER_PROMPT, "")
 #define print_prompt_msg(...) printf(USER_PROMPT, __VA_ARGS__)
 
+
 // struct to interpret shared buffer as a query
 typedef struct {
     int num_regions;
@@ -38,6 +40,7 @@ typedef struct {
     char regions[MAX_REGIONS * REGION_NAME_SZ];
     char users[MAX_USERS * USERNAME_SZ];
 } query;
+
 
 // simulate array of 64B names without pointer indirection
 #define q_region_lookup(q, i) (q.regions + (i * REGION_NAME_SZ))
@@ -52,24 +55,28 @@ typedef struct __attribute__((__packed__)) {
     char owner_id;
     char num_regions;
     char num_users;
-    char buf[96];
+    char buf[96]; // make sure we allocate 100 bytes for this struct
 } drm_md;
 
+
+/* see '/ectf/mb/drm_audio_fw/src/constants.h' for detailed info on
+  DRM audio file format */
 
 // struct to interpret shared buffer as a drm song file
 // packing values skip over non-relevant WAV metadata
 typedef struct __attribute__((__packed__)) {
+    // WAV metadata
     char packing1[4];
-    int file_size;
+    unsigned int file_size;          // size of entire wav file
     char packing2[32];
-    int wav_size;
-    char mdHmac[HMAC_SZ];
-    char iv[16]; // AES initialization vector
-    int numChunks;
-    int encAudioLen;
-    drm_md md;
+    unsigned int wav_size;           // size of file
+    // drm song metadata
+    char mdHmac[HMAC_SZ];   // metadata HMAC
+    char iv[16];            // AES initialization vector
+    int numChunks;          // number of encrypted audio chunks
+    int encAudioLen;        // length of encrypted audio
+    drm_md md;              // song metadata
 } song;
-
 
 
 // shared buffer values
@@ -89,7 +96,7 @@ typedef volatile struct __attribute__((__packed__)) {
     union {
         song song;
         query query;
-        char buf[MAX_SONG_SZ]; // sets correct size of cmd_channel for allocation
+        char buf[MAX_CMD_CHANNEL]; // sets correct size of cmd_channel for allocation
     };
 } cmd_channel;
 

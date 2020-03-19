@@ -62,6 +62,25 @@ Args:
 
 *hint*: test your metadata addition with the metadata_read.py script
 
+### unprotectSong
+Syntax:
+> ./unprotectSong --outfile <PATH_TO_OUTPUT_SONG> --infile <PATH_TO_SONG> --aes <PATH_TO_AES_KEY> --mdKey <PATH_TO_HMAC_METADATA_KEY> --chunkKey <PATH_TO_HMAC_CHUNK_KEY>
+
+Args:
+- <PATH_TO_OUTPUT_SONG> : the absolute or relative path to save the output song to.
+- <PATH_TO_SONG> : the absolute or relative path to the input song to unprotect.
+- <PATH_TO_AES_KEY> : the absolute or relative path to the 256-bit AES key file to decrypt the song with.
+- <PATH_TO_HMAC_METADATA_KEY> : the absolute or relative path to the 256-bit HMAC key file to verify the metadata HMACs with.
+- <PATH_TO_HMAC_CHUNK_KEY> : the absolute or relative path to the 256-bit HMAC key file to verify the audio chunk HMACs with.
+
+### verifyDigitalOut
+Syntax:
+> ./verifyDigitalOut --wav <PATH_TO_ORIGINAL_WAV> --dout <PATH_TO_DIGITAL_OUT_FILE>
+
+Args:
+- <PATH_TO_ORIGINAL_WAV> : the absolute or relative path to the original wav file used to create the drm file. This is to verify the output of the miPod digital_out feature.
+- <PATH_TO_DIGITAL_OUT_FILE> : the absolute or relative path to the digital out (.dout) file created using the miPod.
+
 
 ### buildDevice
 Syntax:

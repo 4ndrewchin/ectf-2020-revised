@@ -176,6 +176,7 @@
 /* #define WOLFSSL_XILINX */
 #define NO_WOLFSSL_DIR
 #define SINGLE_THREADED
+#define LITTLE_ENDIAN_ORDER
 
 /* Uncomment next line if building for WICED Studio. */
 /* #define WOLFSSL_WICED  */

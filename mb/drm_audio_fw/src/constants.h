@@ -52,6 +52,7 @@ typedef struct {
     char users[MAX_USERS * USERNAME_SZ];
 } query;
 
+
 // simulate array of 64B names without pointer indirection
 #define q_region_lookup(q, i) (q.regions + (i * REGION_NAME_SZ))
 #define q_user_lookup(q, i) (q.users + (i * USERNAME_SZ))
@@ -65,31 +66,84 @@ typedef struct __attribute__((__packed__)) {
     char owner_id;
     char num_regions;
     char num_users;
-    char buf[96];
+    char buf[96]; // make sure we allocate 100 bytes for this struct
 } drm_md;
 
+/*
+===================================
+DRM SONG FILE FORMAT (struct song)
+===================================
+Graphic not to scale
+
+start
+ ____________________________
+| WAV file format metadata   |
+| (44 bytes)                 |
+|____________________________|
+| Song metadata HMAC         | ----> created using HMAC
+| (32 bytes)                 |       metadata key
+|____________________________|
+| AES CBC Initialization     |
+| Vector                     |
+| (16 bytes)                 |
+|____________________________|
+| int - num of encrypted     |
+| audio chunks               |
+| (4 bytes)                  |
+|____________________________|
+| int - encrypted audio len  |
+| (4 bytes)                  |
+|____________________________|
+| DRM Song metadata          |
+| (100 bytes)                | ---> struct drm_md
+|____________________________|
+| encrypted [audio+padding]  |
+| (max of 32 Megabytes       |
+|  = 2000 16KB chunks        |
+|____________________________| ___
+| Encrypted Audio Chunk #0   |    |
+| + IV HMAC                  |    |
+| (32 bytes)                 |    |
+|____________________________|    |
+|            ...             |    |--> created using HMAC
+|____________________________|    |    chunk key
+| Encrypted Audio Chunk #n   |    |    (max of 2000 HMACs
+| + IV HMAC                  |    |     = 64 KB total)
+| (32 bytes)                 |    |
+|____________________________| ___|
+end
+
+- All HMACs use the SHA256 hash algorithm
+- Each Chunk HMAC is created from the encrypted chunk + AESIV
+
+MAX DRM FILE SIZE = (44 + 32 + 16 + 4 + 4 + 100 + 33,554,432 + (2000 * 32))
+*/
 
 // struct to interpret shared buffer as a drm song file
 // packing values skip over non-relevant WAV metadata
 typedef struct __attribute__((__packed__)) {
+    // WAV metadata
     char packing1[4];
     u32 file_size;          // size of entire wav file
     char packing2[32];
-    u32 wav_size;           // size of file not including wav md
-    char mdHmac[HMAC_SZ];
-    char iv[16];   // AES initialization vector
-    int numChunks;
-    int encAudioLen;
-    drm_md md;
+    u32 wav_size;           // size of file
+    // drm song metadata
+    char mdHmac[HMAC_SZ];   // metadata HMAC
+    char iv[16];            // AES initialization vector
+    int numChunks;          // number of encrypted audio chunks
+    int encAudioLen;        // length of encrypted audio
+    drm_md md;              // song metadata
 } song;
 
-// accessors for variable-length metadata fields
+
+// accessors for variable-length file fields
 #define get_drm_rids(d) (d.md.buf)
 #define get_drm_uids(d) (d.md.buf + d.md.num_regions)
 #define get_drm_song(d) ((char *)(&d.md) + MD_SZ)
 // index the chunk HMACs just like an array
 // Ex. get_drm_hmac(song, 0) == song.hmacs[0]
 #define get_drm_hmac(d, i) (get_drm_song(d) + d.encAudioLen + (i*HMAC_SZ))
+
 
 // shared buffer values
 enum commands { QUERY_PLAYER, QUERY_SONG, LOGIN, LOGOUT, SHARE, PLAY, STOP, DIGITAL_OUT, PAUSE, RESTART, FF, RW, EXIT };
@@ -125,14 +179,14 @@ typedef struct {
 
 // store of internal state
 typedef struct {
-    char logged_in;                         // whether or not a user is logged on
-    u8 uid;                                 // logged on user id
-    char username[USERNAME_SZ];             // logged on username
-    char pin[MAX_PIN_SZ];                   // logged on pin
-    song_md song_md;                        // current song metadata
-    char aesKey[44];                        // base64 decoded AES key
-    char hmacMdKey[44];                     // base64 decoded HMAC metadata key
-    char hmacChunkKey[44];                       // base64 decoded HMAC encrypted audio chunk key
+    char logged_in;                 // whether or not a user is logged on
+    u8 uid;                         // logged on user id
+    char username[USERNAME_SZ];     // logged on username
+    char pin[MAX_PIN_SZ];           // logged on pin
+    song_md song_md;                // current song metadata
+    char aesKey[44];                // base64 decoded AES key
+    char hmacMdKey[44];             // base64 decoded HMAC metadata key
+    char hmacChunkKey[44];          // base64 decoded HMAC encrypted audio chunk key
 } internal_state;
 
 
