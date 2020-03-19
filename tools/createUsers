@@ -5,8 +5,42 @@ Use: Once per user
 """
 
 import json
+import re
+import string
 from argparse import ArgumentParser
 
+# check for duplicate entries and invalid characters
+# return error string if invalid
+def validate_list(list):
+    usernames = {}
+    for i in range(len(list)):
+        s = list[i]
+
+        # check for malformed input
+        index = s.find(':')
+        if index <= 0 or index >= len(s)-1:
+            return "list contains malformed input"
+
+        # parse user and pin
+        user = s[:index]
+        pin = s[index+1:]
+
+        # check for invalid user
+        match = re.search(r'[^A-Za-z]', user)
+        if match or len(user) < 1 or len(user) > 15:
+            return "list contains an invalid username [^A-Za-z] with len 1-15"
+        
+        # look for dupes
+        if user in usernames:
+            return "list contains duplicate usernames"
+        usernames[user] = 0
+
+        # check for invalid pin
+        match = re.search(r'[^0-9]', pin)
+        if match or len(pin) < 8 or len(pin) > 64:
+            return "list contains an invalid PIN [^0-9] with len 8-64"
+    
+    return ''
 
 def main(user_list, outfile):
     """writes user secrets to json file
@@ -44,4 +78,8 @@ def get_args():
 if __name__ == '__main__':
     users, loc = get_args()
     print("generating user specific secrets")
-    main(users, loc)
+    error_str = validate_list(users)
+    if error_str:
+        print("Error:", error_str)
+    else:
+        main(users, loc)

@@ -6,6 +6,8 @@ Use: Once per ecosystem of devices
 import json
 import os
 import sys
+import string
+import re
 from argparse import ArgumentParser
 from Cryptodome.PublicKey import RSA
 from Cryptodome.Cipher import AES
@@ -90,9 +92,31 @@ def get_args():
     args = parser.parse_args()
     return args.region_list, args.outfile
 
+# check for duplicate entries and invalid characters
+# return error string if invalid
+def validate_list(list):
+    # look for invalid characters
+    for i in range(len(list)):
+        s = list[i]
+        match = re.search(r'[^A-Za-z\s]', s)
+        if match:
+            return "list contains invalid characters [^A-Za-z\s]"
+    # trim leading/trailing whitespace
+    # also reduce all whitespace within str into single space
+    for i in range(len(list)):
+        s = list[i]
+        list[i] = " ".join(s.split())
+    # look for dupes
+    if len(list) != len(set(list)):
+        return "list contains duplicates"
+    return ''
 
 if __name__ == '__main__':
     region_list, outfile = get_args()
     print("generating system specific secrets")
-    regions = {region: num for num, region in enumerate(region_list)}  # Create region IDs based on increasing integers
-    main(regions, outfile)
+    error_str = validate_list(region_list)
+    if error_str:
+        print("Error: ", error_str)
+    else:
+        regions = {region: num for num, region in enumerate(region_list)}  # Create region IDs based on increasing integers
+        main(regions, outfile)
