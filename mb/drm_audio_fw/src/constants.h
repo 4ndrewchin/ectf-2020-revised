@@ -21,7 +21,7 @@
 #define SKIP_SZ (SKIP_TIME_SEC * AUDIO_SAMPLING_RATE * BYTES_PER_SAMP)
 
 // printing utility
-#define MB_PROMPT "\r\nMB> "
+#define MB_PROMPT "MB> "
 #define mb_printf(...) xil_printf(MB_PROMPT __VA_ARGS__)
 
 // protocol constants
@@ -77,22 +77,22 @@ typedef struct __attribute__((__packed__)) {
     char packing2[32];
     u32 wav_size;           // size of file not including wav md
     char mdHmac[HMAC_SZ];
-    unsigned char iv[16];   // AES initialization vector
-    unsigned int numChunks;
-    unsigned int encAudioLen;
+    char iv[16];   // AES initialization vector
+    int numChunks;
+    int encAudioLen;
     drm_md md;
 } song;
 
 // accessors for variable-length metadata fields
 #define get_drm_rids(d) (d.md.buf)
 #define get_drm_uids(d) (d.md.buf + d.md.num_regions)
-#define get_drm_song(d) ((unsigned char *)(&d.md) + MD_SZ)
+#define get_drm_song(d) ((char *)(&d.md) + MD_SZ)
 // index the chunk HMACs just like an array
 // Ex. get_drm_hmac(song, 0) == song.hmacs[0]
 #define get_drm_hmac(d, i) (get_drm_song(d) + d.encAudioLen + (i*HMAC_SZ))
 
 // shared buffer values
-enum commands { QUERY_PLAYER, QUERY_SONG, LOGIN, LOGOUT, SHARE, PLAY, STOP, DIGITAL_OUT, PAUSE, RESTART, FF, RW };
+enum commands { QUERY_PLAYER, QUERY_SONG, LOGIN, LOGOUT, SHARE, PLAY, STOP, DIGITAL_OUT, PAUSE, RESTART, FF, RW, EXIT };
 enum states   { STOPPED, WORKING, PLAYING, PAUSED };
 
 

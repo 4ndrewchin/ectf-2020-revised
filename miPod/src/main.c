@@ -36,9 +36,9 @@ void send_command(int cmd) {
 // parses the input of a command with up to two arguments
 // any arguments not present will be set to NULL
 void parse_input(char *input, char **cmd, char **arg1, char **arg2) {
-    *cmd = strtok(input, " \r\n");
-    *arg1 = strtok(NULL, " \r\n");
-    *arg2 = strtok(NULL, " \r\n");
+    *cmd = strtok(input, " \t\r\n");
+    *arg1 = strtok(NULL, " \t\r\n");
+    *arg2 = strtok(NULL, " \t\r\n");
 }
 
 
@@ -77,7 +77,7 @@ size_t load_file(char *fname, char *song_buf) {
 
     fd = open(fname, O_RDONLY);
     if (fd == -1){
-        mp_printf("Failed to open file! Error = %d\r\n", errno);
+        mp_printf("Failed to open file! Error = %d\r\n",errno);
         return 0;
     }
 
@@ -99,9 +99,10 @@ size_t load_file(char *fname, char *song_buf) {
 
 // attempts to log in for a user
 void login(char *username, char *pin) {
+    // TODO: verify length of username and pin & check for illegal chars
     if (!username || !pin) {
         mp_printf("Invalid user name/PIN\r\n");
-        print_help();
+        //print_help();
         return;
     }
 
@@ -118,6 +119,8 @@ void login(char *username, char *pin) {
 void logout() {
     // drive DRM
     send_command(LOGOUT);
+    while (c->drm_state == STOPPED) continue; // wait for DRM to start working
+    while (c->drm_state == WORKING) continue; // wait for DRM to finish working
 }
 
 
@@ -168,7 +171,6 @@ void query_song(char *song_name) {
     }
 
     // print query results
-    printf("\r\n");
     mp_printf("Queried song (%d regions, %d users)\r\n", c->query.num_regions, c->query.num_users);
 
     mp_printf("Regions: %s", q_region_lookup(c->query, 0));
@@ -199,7 +201,7 @@ void share_song(char *song_name, char *username) {
 
     if (!song_name || !username) {
         mp_printf("Need song name and username\r\n");
-        print_help();
+        //print_help();
         return;
     }
 
@@ -219,7 +221,6 @@ void share_song(char *song_name, char *username) {
     // request was rejected if WAV length is 0
     length = c->song.wav_size;
     if (length == 0) {
-        mp_printf("Share rejected\r\n");
         return;
     }
 
@@ -260,6 +261,12 @@ int play_song(char *song_name) {
     while (c->drm_state == STOPPED) continue; // wait for DRM to start playing
     while (c->drm_state != PLAYING) continue; // wait for DRM to start playing
 
+    if (c->song.wav_size == 0) {
+        return;
+    }
+
+    char paused = 0;
+
     // play loop
     while(1) {
         // get a valid command
@@ -269,7 +276,7 @@ int play_song(char *song_name) {
 
             // exit playback loop if DRM has finished song
             if (c->drm_state == STOPPED) {
-                mp_printf("Song finished\r\n");
+                //mp_printf("Song finished\r\n");
                 return 0;
             }
         } while (strlen(usr_cmd) < 2);
@@ -281,29 +288,50 @@ int play_song(char *song_name) {
         } else if (!strcmp(cmd, "help")) {
             print_playback_help();
         } else if (!strcmp(cmd, "resume")) {
-            send_command(PLAY);
-            usleep(200000); // wait for DRM to print
+            if (paused) {
+                paused = 0;
+                send_command(PLAY);
+                usleep(200000); // wait for DRM to print
+            } else {
+                mp_printf("Song must be paused.\r\n");
+            }
         } else if (!strcmp(cmd, "pause")) {
-            send_command(PAUSE);
-            usleep(200000); // wait for DRM to print
+            if (!paused) {
+                paused = 1;
+                send_command(PAUSE);
+                usleep(200000); // wait for DRM to print
+            } else {
+                mp_printf("Song must be playing.\r\n");
+            }
         } else if (!strcmp(cmd, "stop")) {
-            send_command(STOP);
-            usleep(200000); // wait for DRM to print
-            break;
+            if (!paused) {
+                paused = 0;
+                send_command(STOP);
+                usleep(200000); // wait for DRM to print
+                break;
+            } else {
+                mp_printf("Song must be playing.\r\n");
+            }
         } else if (!strcmp(cmd, "restart")) {
+            paused = 0;
             send_command(RESTART);
             usleep(200000); // wait for DRM to print
         } else if (!strcmp(cmd, "rw")) {
-            send_command(RW);
-            usleep(200000); // wait for DRM to print
+            if (!paused) {
+                send_command(RW);
+                usleep(200000); // wait for DRM to print
+            } else {
+                mp_printf("Song must be playing.\r\n");
+            }
         } else if (!strcmp(cmd, "ff")) {
-            send_command(FF);
-            usleep(200000); // wait for DRM to print
-        }/* else if (!strcmp(cmd, "lyrics")) {
-            mp_printf("Unsupported feature.\r\n\r\n");
-            print_playback_help();
-        } */else {
-            mp_printf("Unrecognized command. Try 'help'.\r\n\r\n");
+            if (!paused) {
+                send_command(FF);
+                usleep(200000); // wait for DRM to print
+            } else {
+                mp_printf("Song must be playing.\r\n");
+            }
+        } else {
+            mp_printf("Unrecognized command. Try 'help'.\r\n");
             //print_playback_help();
         }
     }
@@ -314,7 +342,7 @@ int play_song(char *song_name) {
 
 // turns DRM song into original WAV for digital output
 void digital_out(char *song_name) {
-    char fname[64];
+    char fname[255];
 
     // load file into shared buffer
     if (!load_file(song_name, (void*)&c->song)) {
@@ -327,6 +355,7 @@ void digital_out(char *song_name) {
     while (c->drm_state == STOPPED) continue; // wait for DRM to start working
     while (c->drm_state == WORKING) continue; // wait for DRM to dump file
 
+    // digital_out failed
     if (c->song.wav_size == 0) {
         return;
     }
@@ -352,6 +381,15 @@ void digital_out(char *song_name) {
     }
     close(fd);
     mp_printf("Finished writing file\r\n");
+}
+
+// tells DRM to clear local state (effectively logs out user)
+void mi_exit() {
+    mp_printf("Exiting...\r\n");
+    // drive DRM
+    send_command(EXIT);
+    while (c->drm_state == STOPPED) continue; // wait for DRM to start working
+    while (c->drm_state == WORKING) continue; // wait for DRM to finish working
 }
 
 
@@ -404,11 +442,11 @@ int main(int argc, char** argv)
             digital_out(arg1);
         } else if (!strcmp(cmd, "share")) {
             share_song(arg1, arg2);
-        } else if (!strcmp(cmd, "exit") || !strcmp(cmd, "quit")) {
-            mp_printf("Exiting...\r\n");
+        } else if (!strcmp(cmd, "exit")) {
+            mi_exit();
             break;
         } else {
-            mp_printf("Unrecognized command. Try 'help'.\r\n\r\n");
+            mp_printf("Unrecognized command. Try 'help'.\r\n");
             //print_help();
         }
     }

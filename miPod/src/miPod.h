@@ -60,20 +60,20 @@ typedef struct __attribute__((__packed__)) {
 // packing values skip over non-relevant WAV metadata
 typedef struct __attribute__((__packed__)) {
     char packing1[4];
-    unsigned int file_size;
+    int file_size;
     char packing2[32];
-    unsigned int wav_size;
+    int wav_size;
     char mdHmac[HMAC_SZ];
     char iv[16]; // AES initialization vector
-    unsigned int numChunks;
-    unsigned int encAudioLen;
+    int numChunks;
+    int encAudioLen;
     drm_md md;
 } song;
 
 
 
 // shared buffer values
-enum commands { QUERY_PLAYER, QUERY_SONG, LOGIN, LOGOUT, SHARE, PLAY, STOP, DIGITAL_OUT, PAUSE, RESTART, FF, RW };
+enum commands { QUERY_PLAYER, QUERY_SONG, LOGIN, LOGOUT, SHARE, PLAY, STOP, DIGITAL_OUT, PAUSE, RESTART, FF, RW, EXIT };
 enum states   { STOPPED, WORKING, PLAYING, PAUSED };
 
 
