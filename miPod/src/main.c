@@ -262,7 +262,7 @@ int play_song(char *song_name) {
     while (c->drm_state != PLAYING) continue; // wait for DRM to start playing
 
     if (c->song.wav_size == 0) {
-        return;
+        return 0;
     }
 
     char paused = 0;

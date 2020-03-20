@@ -21,7 +21,8 @@
 #define MAX_SONG_SZ (1<<25)
 #define HMAC_SZ 32
 #define MD_SZ 100
-#define MAX_CMD_CHANNEL 33618764 // actual space needed for 32 MB song with our file format and cmd_channel struct
+#define MAX_CMD_CHANNEL 33621768 // actual space needed for 32 MB song with our file format
+//#define MAX_CMD_CHANNEL 134486376 // actual space needed for 128 MB song with our file format
 
 // printing utility
 #define MP_PROMPT "mP> "
