@@ -16,7 +16,10 @@ from Cryptodome.PublicKey import RSA
 from Cryptodome.Signature import pss
 from Cryptodome.Hash import SHA256, HMAC
 from Cryptodome.Util.Padding import pad
+import binascii
+from speck import SpeckCipher
 
+CHUNK_SZ = 16000
 
 class ProtectedSong(object):
     """Example song object for protected song"""
@@ -43,81 +46,90 @@ class ProtectedSong(object):
 
         # read AES 256 bit key
         aes = open(os.path.abspath(self.path_to_keys+'aes_key'),'rb')
-        aes_key = aes.read(32)
+        aes_key = aes.read()
         aes.close()
 
         # read HMAC keys
-        hmacKey1File = open(os.path.abspath(self.path_to_keys+'key1.der'),'rb')
+        hmacKey1File = open(os.path.abspath(self.path_to_keys+'hmac_md_key'),'rb')
         hmacKey1 = hmacKey1File.read()
         hmacKey1File.close()
 
-        hmacKey2File = open(os.path.abspath(self.path_to_keys+'key2.der'),'rb')
+        hmacKey2File = open(os.path.abspath(self.path_to_keys+'hmac_chunk_key'),'rb')
         hmacKey2 = hmacKey2File.read()
         hmacKey2File.close()
 
         # encrypt audio data using AES-256
         cipher = AES.new(aes_key, AES.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(bytes(self.full_song), AES.block_size)) #use pkcs7
-        # enc_audio = cipher.iv + ct_bytes #append iv to beginning of encrypted song
-        enc_audio = ct_bytes #append iv to beginning of encrypted song
+        hexHmacKey1 = hex(int(binascii.hexlify(hmacKey1),16))
+        speckCipher = SpeckCipher(int(hexHmacKey1, base=16), mode='CBC', key_size=256, block_size=128)
 
-        # hash [metadata + encrypted audio] and then sign
-        h = HMAC.new(hmacKey1, self.metadata, digestmod=SHA256)
-        h.update(enc_audio)
-        protected_wav.writeframes(h.digest())
-        # print("meta and song signature 256")
-        # print(len(h.digest()))
-        # print(h.digest())
+        unecrypt_audio = pad(bytes(self.full_song), 128)
 
-        # print("MetaData length")
-        # print(len(self.metadata))
-        # print(len(self.metadata).to_bytes(4, byteorder='big',signed=False))
-        protected_wav.writeframes(len(self.metadata).to_bytes(4, byteorder='big',signed=False))
 
-        # print("meta data")
-        # print(len(self.metadata))
-        # print(self.metadata)
-        # write song metadata to file
-        protected_wav.writeframes(self.metadata)
+        unecryptNumChunks = math.ceil(len(unecrypt_audio) / CHUNK_SZ)
+        SPECK_CHUNK_SZ = 16 # 128 bits with 256 key size
+        for i in range(1, unecryptNumChunks+1):
+            # CHUNK_SZ + iv bytes
+            byteChunk = unecrypt_audio[(i*SPECK_CHUNK_SZ)-SPECK_CHUNK_SZ:i*SPECK_CHUNK_SZ]
+            print("song in bytes " , str(byteChunk)," len: ", len(byteChunk))
+            key_int = int(binascii.hexlify(byteChunk),16)
+            print("song bytes to hex ", hex(key_int), " len :", len(hex(key_int))-2)
+            print("hex to decimal ", str(key_int)," len: ", len(str(key_int)))
+            print("hex to decimal ", int(str(key_int))," len: ", len(str(key_int)))
 
-        # IV
-        protected_wav.writeframes(cipher.iv)
-        print("IV")
-        print(len(cipher.iv))
-        print(cipher.iv)
+            # int(hex(key_int, base=16)) -> converts to decimal but it has to be 
+            # a hex integer. ex: 0xf5ff
 
-        # number of 16KB chucks
-        numChunks = math.ceil(len(ct_bytes) / 16000)
-        print(numChunks)
-        # total chucks and encrypted song length 
-        protected_wav.writeframes((numChunks).to_bytes(4, byteorder='big', signed=False))
-        protected_wav.writeframes(len(ct_bytes).to_bytes(4, byteorder='big', signed=False))
-        # print("numChunks")
-        # print(len((numChunks).to_bytes(4, byteorder='big', signed=False)))
-        # print((numChunks).to_bytes(4, byteorder='big', signed=False))
-        # print("song length")
-        # print(len(len(ct_bytes).to_bytes(4, byteorder='big', signed=False)))
-        # print(len(ct_bytes).to_bytes(4, byteorder='big', signed=False))
+            speck_ciphertext = speckCipher.encrypt(int(hex(key_int), 16))
+            speck_plaintext = speckCipher.decrypt(speck_ciphertext)
+            print('*'*30)
+            # print(hex(byteChunk))
+            print(speck_ciphertext)
+            print(speck_plaintext)
+            print(hex(speck_plaintext))
 
-        # write encrypted audio data to file
-        print("first 10 bytes of encrypted audio")
-        print(enc_audio[:10])
-        protected_wav.writeframes(enc_audio)
-        # print("enc audio")
-        # print(len(enc_audio))
-        # print(enc_audio[:10])
+            """ All inputted values (keys, plaintexts, IVs, etc) will be truncated or padded with zeros to the bit size specified by 
+            the block and key sizes. The current key and block sizes can be accessed via the key_size and block_size attributes
+            """
+
+            if (i == 1):
+                break
+
+
+        """
+        # calculate and convert total chucks and encrypted song length 
+        numChunks = math.ceil(len(enc_audio) / CHUNK_SZ)
+        nChunksBytes = (numChunks).to_bytes(4, byteorder='little', signed=False)
+        eAudioLenBytes = len(enc_audio).to_bytes(4, byteorder='little', signed=False)
+
+        chunkHmacs = []        
 
         for i in range(1, numChunks+1):
-            # 16000 + iv bytes
-            h = HMAC.new(hmacKey2,ct_bytes[(i*16000)-16000:i*16000]+cipher.iv, digestmod=SHA256).digest()
-            # print(len(h))
-            if i == 1:
-                print("first hash value")
-                print(h)
-            protected_wav.writeframes(h)
+            # CHUNK_SZ + iv bytes
+            h = HMAC.new(hmacKey2,enc_audio[(i*CHUNK_SZ)-CHUNK_SZ:i*CHUNK_SZ]+cipher.iv, digestmod=SHA256).digest()
+            chunkHmacs.append(h)
+
+        # create hmac of [iv + nchunks + e_audio_len + MD]
+        h = HMAC.new(hmacKey1, cipher.iv, digestmod=SHA256)
+        h.update(nChunksBytes)
+        h.update(eAudioLenBytes)
+        h.update(self.metadata)
+        #h.update(enc_audio)
+        #for hmac in chunkHmacs:
+        #    h.update(hmac)
+
+        # write everything to file
+        protected_wav.writeframes(h.digest())
+        protected_wav.writeframes(cipher.iv)
+        protected_wav.writeframes(nChunksBytes)
+        protected_wav.writeframes(eAudioLenBytes)
+        protected_wav.writeframes(self.metadata)
+        protected_wav.writeframes(enc_audio)
+        for hmac in chunkHmacs:
+            protected_wav.writeframes(hmac)
 
         protected_wav.close()
-
+        """
     def read_song(self, path, metadata_frames=0):
         """Reads a wave file
         Args:
@@ -137,17 +149,17 @@ class ProtectedSong(object):
 
 def create_metadata(regions, user, user_secret_location, region_info):
     """Returns a byte string formatted as follows:
-    METADATA_LENGTH(1B)/ownerID(1B)/REGION_LEN(1B)/USER_LEN(1B)/REGIONID1(1B)/REGIONID2 (1B)/.../opt. parity
+    METADATA_LENGTH(1B)/ownerID(1B)/REGION_LEN(1B)/USER_LEN(1B)/REGIONID1(1B)/REGIONID2 (1B)/.../padding
     Args:
         regions (list): list of regions to provision song for
         user (string): user name for owner of the song
         user_secret_location (string): path to user secrets file
         region_info (dict): mapping of regions provided by region_information.json
     Returns:
-        metadata (bytes): bytes of encoded metadata
+        metadata (bytes): bytes of encoded metadata, padded to 100 bytes
     Example:
         >>create_metadata(['USA', 'Canada'], 'user1', 'user_secrets.json', {'USA': 1, 'Canada':2})
-        'x06/x00/x01/x00/x01/x02'
+        'x06/x00/x01/x00/x01/x02' + 94 null bytes
     Max users: 64
     Max regions: 32
     Max length of metadata is 1+1+1+1+32+63+1 = 100
@@ -157,12 +169,13 @@ def create_metadata(regions, user, user_secret_location, region_info):
     # note: metadata must be an even length since each sample is 2B long
     # and ARM processors require memory accesses to be aligned to the type size
     metadata = struct.pack(
-        '=3B{regions_length}s{regions_len_2}s'.format(regions_length=len(regions), regions_len_2=len(regions) % 2),
+        '=3B{regions_length}s'.format(regions_length=len(regions)),
         int(user_secrets[user]['id']), len(regions), 0,
-        bytes([region_info[str(r)] for r in regions]),
-        b'\x00' if len(regions) % 2 else b'')
+        bytes([region_info[str(r)] for r in regions]))
 
-    return bytes([len(metadata) + 1]) + metadata
+    md_len = len(metadata) + 1
+    pad_len = 100 - md_len
+    return bytes([md_len]) + metadata + (b'\x00'*pad_len)
 
 
 def main():
@@ -183,7 +196,6 @@ def main():
         raise ValueError('Ensure all user IDs are integers and all regions are in the provided region_information.json')
 
     keys_path = get_path(args.user_secrets_path)
-
     protected_song = ProtectedSong(args.infile, metadata, keys_path)
     protected_song.save_secured_song_to_wave(args.outfile)
 
