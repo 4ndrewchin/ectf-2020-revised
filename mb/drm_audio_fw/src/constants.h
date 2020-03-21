@@ -99,7 +99,7 @@ start
 |____________________________|
 | encrypted [audio+padding]  |
 | (max of 32 Megabytes       |
-|  = 2000 16KB chunks        |
+|  = 2098 16000B chunks      |
 |____________________________| ___
 | Encrypted Audio Chunk #0   |    |
 | + IV HMAC                  |    |
@@ -107,7 +107,7 @@ start
 |____________________________|    |
 |            ...             |    |--> created using HMAC
 |____________________________|    |    chunk key
-| Encrypted Audio Chunk #n   |    |    (max of 2000 HMACs
+| Encrypted Audio Chunk #n   |    |    (max of 2098 HMACs
 | + IV HMAC                  |    |     = 64 KB total)
 | (32 bytes)                 |    |
 |____________________________| ___|
@@ -116,7 +116,8 @@ end
 - All HMACs use the SHA256 hash algorithm
 - Each Chunk HMAC is created from the encrypted chunk + AESIV
 
-MAX DRM FILE SIZE = (44 + 32 + 16 + 4 + 4 + 100 + 33,554,432 + (2000 * 32))
+MAX DRM FILE SIZE = 
+   32 MB song --> (44 + 32 + 16 + 4 + 4 + 100 + 33,554,432 + (2098 * 32)) = 33621768
 */
 
 // struct to interpret shared buffer as a drm song file

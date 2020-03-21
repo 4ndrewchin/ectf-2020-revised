@@ -18,11 +18,10 @@
 #define MAX_USERS 64
 #define USERNAME_SZ 64
 #define MAX_PIN_SZ 64
-#define MAX_SONG_SZ (1<<25)
+//#define MAX_SONG_SZ (1<<25)
 #define HMAC_SZ 32
 #define MD_SZ 100
-#define MAX_CMD_CHANNEL 33621768 // actual space needed for 32 MB song with our file format
-//#define MAX_CMD_CHANNEL 134486376 // actual space needed for 128 MB song with our file format
+#define MAX_SONG_SZ 33621768 // actual space needed for 32 MB song with our file format
 
 // printing utility
 #define MP_PROMPT "mP> "
@@ -97,7 +96,7 @@ typedef volatile struct __attribute__((__packed__)) {
     union {
         song song;
         query query;
-        char buf[MAX_CMD_CHANNEL]; // sets correct size of cmd_channel for allocation
+        char buf[MAX_SONG_SZ]; // sets correct size of cmd_channel for allocation
     };
 } cmd_channel;
 
