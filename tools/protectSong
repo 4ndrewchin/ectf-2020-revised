@@ -16,6 +16,8 @@ from Cryptodome.PublicKey import RSA
 from Cryptodome.Signature import pss
 from Cryptodome.Hash import SHA256, HMAC
 from Cryptodome.Util.Padding import pad
+from Cryptodome.Random import get_random_bytes
+from speck import SpeckCipher
 
 CHUNK_SZ = 16000
 
@@ -57,8 +59,21 @@ class ProtectedSong(object):
         hmacKey2File.close()
 
         # encrypt audio data using AES-256
-        cipher = AES.new(aes_key, AES.MODE_CBC)
-        enc_audio = cipher.encrypt(pad(bytes(self.full_song), AES.block_size)) #use pkcs7
+        aeskey_int = int.from_bytes(aes_key, byteorder='little', signed='False')
+        iv = get_random_bytes(16)
+        iv_int = int.from_bytes(iv, byteorder='little', signed='False')
+        #cipher = AES.new(aes_key, AES.MODE_CBC)
+        cipher = SpeckCipher(aeskey_int, 256, 128, 'CBC', iv_int)
+        padded_audio = pad(bytes(self.full_song), AES.block_size)
+        enc_audio = bytes()
+        # speck can only encrypt block_size bytes at a time :(
+        print("Encrypting... (this will take a while)")
+        for i in range(0,len(padded_audio),AES.block_size):
+            enc_speck_chunk = cipher.encrypt(int.from_bytes(padded_audio[i:i+AES.block_size], byteorder='little', signed='False'))
+            enc_speck_chunk = enc_speck_chunk.to_bytes(AES.block_size, byteorder='little')
+            enc_audio += enc_speck_chunk
+        #enc_audio = cipher.encrypt(pad(bytes(self.full_song), AES.block_size)) #use pkcs7
+        
 
         # calculate and convert total chucks and encrypted song length 
         numChunks = math.ceil(len(enc_audio) / CHUNK_SZ)
@@ -69,11 +84,11 @@ class ProtectedSong(object):
 
         for i in range(1, numChunks+1):
             # CHUNK_SZ + iv bytes
-            h = HMAC.new(hmacKey2,enc_audio[(i*CHUNK_SZ)-CHUNK_SZ:i*CHUNK_SZ]+cipher.iv, digestmod=SHA256).digest()
+            h = HMAC.new(hmacKey2,enc_audio[(i*CHUNK_SZ)-CHUNK_SZ:i*CHUNK_SZ]+iv, digestmod=SHA256).digest()
             chunkHmacs.append(h)
 
         # create hmac of [iv + nchunks + e_audio_len + MD]
-        h = HMAC.new(hmacKey1, cipher.iv, digestmod=SHA256)
+        h = HMAC.new(hmacKey1, iv, digestmod=SHA256)
         h.update(nChunksBytes)
         h.update(eAudioLenBytes)
         h.update(self.metadata)
@@ -83,7 +98,7 @@ class ProtectedSong(object):
 
         # write everything to file
         protected_wav.writeframes(h.digest())
-        protected_wav.writeframes(cipher.iv)
+        protected_wav.writeframes(iv)
         protected_wav.writeframes(nChunksBytes)
         protected_wav.writeframes(eAudioLenBytes)
         protected_wav.writeframes(self.metadata)

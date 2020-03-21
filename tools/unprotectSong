@@ -15,8 +15,17 @@ from Cryptodome.Hash import SHA256, HMAC
 from Cryptodome.PublicKey import RSA
 from Cryptodome.Signature import pss
 from Cryptodome.Util.Padding import unpad
+from speck import SpeckCipher
 
 CHUNK_SZ = 16000
+
+def speck_decrypt_chunk(cipher, chunk, len):
+   p_chunk = bytes()
+   for i in range(0,len,AES.block_size):
+      dec_speck_chunk = cipher.decrypt(int.from_bytes(chunk[i:i+AES.block_size], byteorder='little', signed='False'))
+      dec_speck_chunk = dec_speck_chunk.to_bytes(AES.block_size, byteorder='little')
+      p_chunk += dec_speck_chunk
+   return p_chunk
 
 def unprotect(infile, outfile, aeskey_f, hmacMdKeyFile, hmacChunkKeyFile):
    # read aeskey_f into byte buffer
@@ -114,7 +123,10 @@ def unprotect(infile, outfile, aeskey_f, hmacMdKeyFile, hmacChunkKeyFile):
    if md_size > 100:
       print('Something is wrong. Metadata max size is 100, got %s' % md_size)
       return 0
-   cipher = AES.new(aes_key, AES.MODE_CBC, iv)
+   #cipher = AES.new(aes_key, AES.MODE_CBC, iv)
+   aeskey_int = int.from_bytes(aes_key, byteorder='little', signed='False')
+   iv_int = int.from_bytes(iv, byteorder='little', signed='False')
+   cipher = SpeckCipher(aeskey_int, 256, 128, 'CBC', iv_int)
 
    #decrypting in chunks
    rem = len(enc_audio)
@@ -144,7 +156,8 @@ def unprotect(infile, outfile, aeskey_f, hmacMdKeyFile, hmacChunkKeyFile):
          return 0
 
       # decrypt block
-      p_chunk = cipher.decrypt(e_chunk)
+      #p_chunk = cipher.decrypt(e_chunk)
+      p_chunk = speck_decrypt_chunk(cipher, e_chunk, increment)
 
       if i == intNumChunks-1:
          p_chunk = unpad(p_chunk, AES.block_size)
