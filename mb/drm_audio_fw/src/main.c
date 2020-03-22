@@ -213,8 +213,8 @@ int is_locked() {
  * return 0 on success, -1 otherwise
  */
 int init_cryptkeys() {
-    word32 outLen = b64AES_KEY_SZ;
-    if (Base64_Decode((void *)AES_KEY, (word32)b64AES_KEY_SZ, (void *)s.aesKey, &outLen) != 0) {
+    word32 outLen = b64SIMON_KEY_SZ;
+    if (Base64_Decode((void *)SIMON_KEY, (word32)b64SIMON_KEY_SZ, (void *)s.simonKey, &outLen) != 0) {
         return -1;
     }
     outLen = b64MD_KEY_SZ;
@@ -293,7 +293,7 @@ int verify_song() {
     uint64 mdHash = c->song.mdHash;
 
     mb_printf("Verifying Audio File...\r\n");
-    uint64 dataLen = AES_BLK_SZ + sizeof(int) + sizeof(int) + MD_SZ + MD_KEY_SZ;
+    uint64 dataLen = SIMON_BLK_SZ + sizeof(int) + sizeof(int) + MD_SZ + MD_KEY_SZ;
     char data[dataLen];
     memcpy(data, c->song.iv, dataLen-MD_KEY_SZ);
     memcpy(data+dataLen-MD_KEY_SZ, s.mdKey, MD_KEY_SZ);
@@ -454,7 +454,7 @@ void share_song() {
     c->song.md.buf[s.song_md.num_regions + c->song.md.num_users++] = uid;
 
     // update metadata hash and copy it into the file in the shared memory
-    uint64 dataLen = AES_BLK_SZ + sizeof(int) + sizeof(int) + MD_SZ + MD_KEY_SZ;
+    uint64 dataLen = SIMON_BLK_SZ + sizeof(int) + sizeof(int) + MD_SZ + MD_KEY_SZ;
     char data[dataLen];
     memcpy(data, c->song.iv, dataLen-MD_KEY_SZ);
     memcpy(data+dataLen-MD_KEY_SZ, s.mdKey, MD_KEY_SZ);
@@ -505,12 +505,12 @@ void play_song() {
     // whether we are operating on the first chunk of the audio
     int firstChunk = TRUE;
     // save a copy of the initialization vector used for the AES-CBC encryption
-    char origIv[AES_BLK_SZ];
-    memcpy(origIv, c->song.iv, AES_BLK_SZ);
+    char origIv[SIMON_BLK_SZ];
+    memcpy(origIv, c->song.iv, SIMON_BLK_SZ);
     // buffer used to store current "IV" value -- we change this value after decrypting
     // each audio chunk, but initially, it is the original initialization vector
-    char iv[AES_BLK_SZ];
-    memcpy(iv, c->song.iv, AES_BLK_SZ);
+    char iv[SIMON_BLK_SZ];
+    memcpy(iv, c->song.iv, SIMON_BLK_SZ);
     // buffer used to hold current decrypted audio chunk
     char plainChunk[CHUNK_SZ];
     // chunk number currently being decrypted
@@ -593,17 +593,17 @@ void play_song() {
         if (firstChunk) {
             firstChunk = FALSE;
         } else {
-            memcpy(iv, (get_drm_song(c->song) + lenAudio - rem - AES_BLK_SZ), AES_BLK_SZ);
+            memcpy(iv, (get_drm_song(c->song) + lenAudio - rem - SIMON_BLK_SZ), SIMON_BLK_SZ);
         }
 
         // verify chunk using glowworm hash
         uint64* hashes = get_drm_hashes(c->song);
         uint64 chunkHash = hashes[chunknum++];
-        uint64 dataLen = cp_num + AES_BLK_SZ + CHUNK_KEY_SZ;
+        uint64 dataLen = cp_num + SIMON_BLK_SZ + CHUNK_KEY_SZ;
         char data[dataLen];
         memcpy(data, (get_drm_song(c->song) + lenAudio - rem), cp_num);
-        memcpy(data+cp_num, origIv, AES_BLK_SZ);
-        memcpy(data+cp_num+AES_BLK_SZ, s.chunkKey, CHUNK_KEY_SZ);
+        memcpy(data+cp_num, origIv, SIMON_BLK_SZ);
+        memcpy(data+cp_num+SIMON_BLK_SZ, s.chunkKey, CHUNK_KEY_SZ);
         uint64 hash = glowwormHash(data, dataLen);
         if (chunkHash != hash) {
             mb_printf("Failed to play audio\r\n");
@@ -611,7 +611,7 @@ void play_song() {
         }
 
         // decrypt chunk
-        ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, s.aesKey, (word32)AES_KEY_SZ, iv);
+        ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, s.simonKey, (word32)SIMON_KEY_SZ, iv);
         if (ret != 0) {
             mb_printf("Failed to play audio\r\n");
             return;
@@ -694,19 +694,19 @@ void digital_out() {
     // number of encrypted chunks
     int nchunks = c->song.numChunks;
     // save a copy of the initialization vector used for the AES-CBC encryption
-    char origIv[AES_BLK_SZ];
-    memcpy(origIv, c->song.iv, AES_BLK_SZ);
+    char origIv[SIMON_BLK_SZ];
+    memcpy(origIv, c->song.iv, SIMON_BLK_SZ);
     // buffer used to store current "IV" value -- we change this value after decrypting
     // each audio chunk, but initially, it is the original initialization vector
-    char iv[AES_BLK_SZ];
-    memcpy(iv, c->song.iv, AES_BLK_SZ);
+    char iv[SIMON_BLK_SZ];
+    memcpy(iv, c->song.iv, SIMON_BLK_SZ);
     // buffer used to hold current decrypted audio chunk
     char plainChunk[CHUNK_SZ];
     // chunk number currently being decrypted
     int chunknum = 0;
 
     // remove all metadata size from file sizes to reflect audio only
-    unsigned int all_md_len = sizeof(uint64) + AES_BLK_SZ + sizeof(int)*2 + MD_SZ + nchunks*sizeof(uint64);
+    unsigned int all_md_len = sizeof(uint64) + SIMON_BLK_SZ + sizeof(int)*2 + MD_SZ + nchunks*sizeof(uint64);
     file_size -= all_md_len;
     wav_size -= all_md_len;
 
@@ -733,11 +733,11 @@ void digital_out() {
         // verify chunk using glowworm hash
         uint64* hashes = get_drm_hashes(c->song);
         uint64 chunkHash = hashes[chunknum++];
-        uint64 dataLen = cp_num + AES_BLK_SZ + CHUNK_KEY_SZ;
+        uint64 dataLen = cp_num + SIMON_BLK_SZ + CHUNK_KEY_SZ;
         char data[dataLen];
         memcpy(data, (get_drm_song(c->song) + lenAudio - rem), cp_num);
-        memcpy(data+cp_num, origIv, AES_BLK_SZ);
-        memcpy(data+cp_num+AES_BLK_SZ, s.chunkKey, CHUNK_KEY_SZ);
+        memcpy(data+cp_num, origIv, SIMON_BLK_SZ);
+        memcpy(data+cp_num+SIMON_BLK_SZ, s.chunkKey, CHUNK_KEY_SZ);
         uint64 hash = glowwormHash(data, dataLen);
         if (chunkHash != hash) {
             mb_printf("Failed to dump song\r\n");
@@ -745,7 +745,7 @@ void digital_out() {
         }
 
         // decrypt chunk
-        ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, s.aesKey, AES_KEY_SZ, iv);
+        ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, s.simonKey, SIMON_KEY_SZ, iv);
         if (ret != 0) {
             mb_printf("Failed to dump song\r\n");
             c->song.wav_size = 0;
@@ -753,7 +753,7 @@ void digital_out() {
         }
 
         // get next IV before replacing encrypted chunk with decrypted chunk
-        memcpy(iv, (get_drm_song(c->song) + lenAudio - rem + cp_num - AES_BLK_SZ), AES_BLK_SZ);
+        memcpy(iv, (get_drm_song(c->song) + lenAudio - rem + cp_num - SIMON_BLK_SZ), SIMON_BLK_SZ);
         memcpy((get_drm_song(c->song) + lenAudio - rem), plainChunk, CHUNK_SZ);
 
         // if last chunk unpad using PKCS#7

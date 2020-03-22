@@ -42,15 +42,15 @@ def main(region_names, user_names, user_secrets, region_secrets, device_dir, reg
               "Please ensure all regions entered are in the list: {user_secrets}".format(e=e, user_secrets=user_secrets.keys()))
         return
 
-    # get aes key
+    # get simon key
     try:
-        aes_path = os.path.abspath(get_path(region_secrets_path)+'aes_key')
-        aes = open(aes_path, 'rb')
+        simon_path = os.path.abspath(get_path(region_secrets_path)+'simon_key')
+        simon = open(simon_path, 'rb')
     except Exception as e:
-        print('Unable to open aes_key file: {e}'.format(e=e))
+        print('Unable to open simon_key file: {e}'.format(e=e))
         return
-    aes_key = aes.read(32)
-    aes.close()
+    simon_key = simon.read(32)
+    simon.close()
 
     # get glowworm metadata key
     try:
@@ -97,10 +97,10 @@ const char *PROVISIONED_PINS[] = {{ {", ".join(['"' + user_secrets[u]['pin'] + '
 
 /* BASE64 DECODE KEYS BEFORE USING */
 
-#define AES_BLK_SZ 16
-#define AES_KEY_SZ {len(aes_key)}
-#define b64AES_KEY_SZ {len(b64encode(aes_key))}
-const char *AES_KEY = {'"'+str(b64encode(aes_key)).strip("b'")+'"'};
+#define SIMON_BLK_SZ 16
+#define SIMON_KEY_SZ {len(simon_key)}
+#define b64SIMON_KEY_SZ {len(b64encode(simon_key))}
+const char *SIMON_KEY = {'"'+str(b64encode(simon_key)).strip("b'")+'"'};
 
 #define MD_KEY_SZ {len(mdKey)}
 #define b64MD_KEY_SZ {len(b64encode(mdKey))}

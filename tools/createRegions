@@ -9,7 +9,6 @@ import sys
 import string
 import re
 from argparse import ArgumentParser
-from Cryptodome.Cipher import AES
 from Cryptodome.Random import get_random_bytes
 
 def main(region_dict, file_name):
@@ -55,18 +54,18 @@ def main(region_dict, file_name):
         sys.exit(e)
     chunkKey.close()
 
-    #AES
+    # 256-bit key for simon cipher
     try:
-        aes = open(os.path.abspath(dir+"aes_key"), "wb")
+        simon = open(os.path.abspath(dir+"simon_key"), "wb")
     except Exception as e:
-        print("Unable to open aes_key file: %s" % (e,))
+        print("Unable to open simon_key file: %s" % (e,))
         sys.exit(e)
     try:
-        aes.write(get_random_bytes(32)) # 256-bit key
+        simon.write(get_random_bytes(32)) # 256-bit key
     except Exception as e:
-        print("Unable to write to aes_key file: %s" % (e,))
+        print("Unable to write to simon_key file: %s" % (e,))
         sys.exit(e)
-    aes.close()
+    simon.close()
 
 # removes filename from path
 # Ex. './a/b/file.txt' --> './a/b/'

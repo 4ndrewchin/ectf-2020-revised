@@ -84,7 +84,7 @@ start
 | glowworm hash              |
 | (8 bytes)                  |
 |____________________________|
-| AES CBC Initialization     |
+| Simon CBC Initialization   |
 | Vector                     |
 | (16 bytes)                 |
 |____________________________|
@@ -128,7 +128,7 @@ typedef struct __attribute__((__packed__)) {
     u32 wav_size;           // size of file
     // drm song metadata
     uint64 mdHash;          // metadata hash
-    char iv[16];            // AES initialization vector
+    char iv[16];            // Simon initialization vector
     int numChunks;          // number of encrypted audio chunks
     int encAudioLen;        // length of encrypted audio
     drm_md md;              // song metadata
@@ -181,7 +181,7 @@ typedef struct {
     char username[USERNAME_SZ];     // logged on username
     char pin[MAX_PIN_SZ];           // logged on pin
     song_md song_md;                // current song metadata
-    char aesKey[44];                // base64 decoded AES key
+    char simonKey[44];                // base64 decoded Simon key
     char mdKey[44];                 // base64 decoded metadata key
     char chunkKey[44];              // base64 decoded encrypted audio chunk key
 } internal_state;

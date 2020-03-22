@@ -71,7 +71,7 @@ typedef struct __attribute__((__packed__)) {
     unsigned int wav_size;     // size of file
     // drm song metadata
     unsigned long long mdHash; // metadata hash
-    char iv[16];               // AES initialization vector
+    char iv[16];               // Simon initialization vector
     int numChunks;             // number of encrypted audio chunks
     int encAudioLen;           // length of encrypted audio
     drm_md md;                 // song metadata
