@@ -18,6 +18,52 @@ from Cryptodome.Util.Padding import unpad
 
 CHUNK_SZ = 16000
 
+'''
+n - length of the last string hashed
+s - ring buffer used for the internal state (32 words - 2048 bits)
+      an element s[i] is a 64-bit word, which is the ith element of the buffer,
+      wrapping around if necessary, when the index i becomes too large for the
+      buffer
+'''
+
+def glowwormAddBit(b, s, n, t):
+   if b == 1:
+      t = s[n % 32] ^ 0xffffffff
+   else:
+      t = s[n % 32] ^ 0
+   t = (t|(t>>1 & 0xffffffffffffffff)) ^ (t<<1 & 0xffffffffffffffff)
+   t ^= (t>>4 & 0xffffffffffffffff) ^ (t>>8 & 0xffffffffffffffff) ^ (t>>16 & 0xffffffffffffffff) ^ (t>>32 & 0xffffffffffffffff)
+   n = n + 1
+   s[n % 32] = s[n % 32] ^ t
+   h = s[n % 32] & 0xffffffffffffffff
+   return h, s, n, t
+
+def glowwormInit(s, n, t, h):
+   for i in range(4096):
+      h, s, n, t = glowwormAddBit((h & 1), s, n, t)
+   return s, n, t, h
+
+def glowwormHash(data, dataLen):
+   CHECKVALUE = 0xCCA4220FC78D45E0
+   s = [0] * 32
+   h = 1
+   n = 0
+   t = 0
+
+   s, n, t, h = glowwormInit(s, n, t, h)
+   assert(h == CHECKVALUE)
+   
+   for idx in range(dataLen):
+      currByte = data[idx]
+      for bIdx in range(7, -1, -1):
+         if ((currByte & (1<<bIdx))>>bIdx) == 0:
+            bit = 0
+         else:
+            bit = 1
+         h, s, n, t = glowwormAddBit(bit,s,n,t)
+
+   return h
+
 def unprotect(infile, outfile, aeskey_f, hmacMdKeyFile, hmacChunkKeyFile):
    # read aeskey_f into byte buffer
    try:
@@ -64,14 +110,14 @@ def unprotect(infile, outfile, aeskey_f, hmacMdKeyFile, hmacChunkKeyFile):
    protected.close()
 
    # get segments of encrypted file
-   signature_len = 32
+   gwMdHash_len = 8
 
    # get signature with first 256
-   signature = data[:signature_len]
+   gwMdHash = data[:gwMdHash_len]
 
    # get iv
-   end_iv = signature_len + 16
-   iv = data[signature_len:end_iv]
+   end_iv = gwMdHash_len + 16
+   iv = data[gwMdHash_len:end_iv]
    
    # get the number of 16000 chunks and audio length in bytes
    numChunks = data[end_iv:end_iv+4]
@@ -93,19 +139,14 @@ def unprotect(infile, outfile, aeskey_f, hmacMdKeyFile, hmacChunkKeyFile):
    # get all hashes of each block
    block_hashes = data[end_meta_data+intAudioLength:]
 
-   # recompute the hash of all metadata
-   verifier = HMAC.new(hmacMdKey, iv, digestmod=SHA256) 
-   verifier = verifier.update(numChunks)
-   verifier = verifier.update(audio_length)
-   verifier = verifier.update(meta_data)
-   #verifier = verifier.update(enc_audio)
-   #verifier = verifier.update(block_hashes)
-
-   print('Verifying metadata signature...', end='')
-   try:
-      verifier.verify(signature)
-   except Exception as e:
-      print('error: %s' % (e,))
+   # recompute glowworm hash of [iv + nchunks + e_audio_len + MD + metadata key]
+   toHash = iv + numChunks + audio_length + meta_data + hmacMdKey
+   toHashLen = len(iv) + len(numChunks) + len(audio_length) + len(meta_data) + len(hmacMdKey)
+   glowworm_md_hash = glowwormHash(toHash, toHashLen).to_bytes(8, byteorder='little', signed=False)
+   
+   print('Verifying metadata hash...', end='')
+   if glowworm_md_hash != gwMdHash:
+      print('metadata hash does not match')
       return 0
    print('success')
 
@@ -118,11 +159,12 @@ def unprotect(infile, outfile, aeskey_f, hmacMdKeyFile, hmacChunkKeyFile):
 
    #decrypting in chunks
    rem = len(enc_audio)
-   print('TOTAL ENCRYPTED LEN: '+str(rem))
+   print('Total encrypted length: '+str(rem))
    audio = bytes()
-   print('num 16KB chunks: '+str(intNumChunks))
+   print('Number of 16KB chunks: '+str(intNumChunks))
    counter = 0
    start = 0
+   print('Verifying chunks and decrypting (this will take awhile)...', end='')
    for i in range(0, intNumChunks):
 
       counter = counter + 1
@@ -135,12 +177,13 @@ def unprotect(infile, outfile, aeskey_f, hmacMdKeyFile, hmacChunkKeyFile):
       e_chunk = enc_audio[start:start+increment]
       start = start + increment
 
-      # recompute the hash
-      try:
-         h = HMAC.new(hmacChunkKey, e_chunk+iv, digestmod=SHA256)
-         h.verify(block_hashes[i*32:32+i*32])
-      except Exception as e:
-         print('Failed to verify chunk #' + str(i))
+      # recompute the glowworm chunk hash of [enc audio chunk + iv bytes + chunk key]
+      toHash = e_chunk + iv + hmacChunkKey
+      toHashLen = len(e_chunk) + len(iv) + len(hmacChunkKey)
+      glowworm_chunk_hash = glowwormHash(toHash, toHashLen).to_bytes(8, byteorder='little', signed=False)
+
+      if glowworm_chunk_hash != block_hashes[i*8:8+i*8]:
+         print('chunk hash #'+str(i)+' does not match')
          return 0
 
       # decrypt block
@@ -150,7 +193,7 @@ def unprotect(infile, outfile, aeskey_f, hmacMdKeyFile, hmacChunkKeyFile):
          p_chunk = unpad(p_chunk, AES.block_size)
       audio += p_chunk
 
-   print('Song successfully decrypted')
+   print('success')
 
    # wave.open outfile
    try:
@@ -158,6 +201,8 @@ def unprotect(infile, outfile, aeskey_f, hmacMdKeyFile, hmacChunkKeyFile):
    except Exception as e:
       print('Unable to open outfile: %s' % (e,))
       return 0
+
+   print("Writing everything to .wav file...")
 
    # set outfile metadata to saved wav metadata
    unprotected.setnchannels(nchannels)

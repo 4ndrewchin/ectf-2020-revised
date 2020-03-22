@@ -19,9 +19,8 @@
 #define USERNAME_SZ 64
 #define MAX_PIN_SZ 64
 //#define MAX_SONG_SZ (1<<25)
-#define HMAC_SZ 32
 #define MD_SZ 100
-#define MAX_SONG_SZ 33621768 // actual space needed for 32 MB song with our file format
+#define MAX_SONG_SZ 33571392 // actual space needed for 32 MB song with our file format
 
 // printing utility
 #define MP_PROMPT "mP> "
@@ -67,15 +66,15 @@ typedef struct __attribute__((__packed__)) {
 typedef struct __attribute__((__packed__)) {
     // WAV metadata
     char packing1[4];
-    unsigned int file_size;          // size of entire wav file
+    unsigned int file_size;    // size of entire wav file
     char packing2[32];
-    unsigned int wav_size;           // size of file
+    unsigned int wav_size;     // size of file
     // drm song metadata
-    char mdHmac[HMAC_SZ];   // metadata HMAC
-    char iv[16];            // AES initialization vector
-    int numChunks;          // number of encrypted audio chunks
-    int encAudioLen;        // length of encrypted audio
-    drm_md md;              // song metadata
+    unsigned long long mdHash; // metadata hash
+    char iv[16];               // AES initialization vector
+    int numChunks;             // number of encrypted audio chunks
+    int encAudioLen;           // length of encrypted audio
+    drm_md md;                 // song metadata
 } song;
 
 

@@ -229,90 +229,78 @@ int init_cryptkeys() {
 }
 
 
-/* compute HMAC using data and key and compare to DRM HMAC
- * return 0 on success, -1 otherwise
- *
- * key      : HMAC key
- * keyLen   : HMAC key length
- * args     : number of different data to update hmac object with
- * data     : array of char pointers (data) to create HMAC with
- * dataLens : length of each data to be included in hash
- * drmHmac  : HMAC to compare computed HMAC to
- */
-int verify_hmac(char* key, int keyLen, int args, char* data[], int dataLens[], char* orig) {
-    if (key == NULL || keyLen <= 0 || args <= 0 || data == NULL || dataLens == NULL || orig == NULL) {
-        return -1;
-    }
-    Hmac hmac;
-    int total = 0;
-    if (wc_HmacSetKey(&hmac, SHA256, key, keyLen) != 0) {
-        return -1;
-    }
-    for (int i = 0; i < args; i++) {
-        if (wc_HmacUpdate(&hmac, data[i], dataLens[i]) != 0) {
-            return -1;
-        }
-        total += dataLens[i];
-    }
-    char hash[total];
-    if (wc_HmacFinal(&hmac, hash) != 0) {
-        return -1;
-    }
-    if (memcmp(hash, orig, HMAC_SZ) != 0) {
-        return -1;
-    }
-    return 0;
+#define glowwormAddBit(b,s,n,t) ( \
+    t = s[n % 32] ^ ((b) ? 0xffffffff : 0), \
+    t = (t|(t>>1)) ^ (t<<1), \
+    t ^= (t>>4) ^ (t>>8) ^ (t>>16) ^ (t>>32),\
+    n++, \
+    s[n % 32] ^= t \
+)
+
+
+#define glowwormInit(s,n,t,h) { \
+    h = 1; \
+    n = 0; \
+    for (int i=0; i<32; i++) \
+        s[i]=0; \
+    for (int i=0; i<4096; i++) \
+        h=glowwormAddBit((h & 1L),s,n,t); \
+    n = 0; \
 }
 
 
-/* verify song metadata using the metadata HMAC from the song in the shared buffer
+// Call glowwormInit once, which returns the hash of the
+// empty string, which should equal CHECKVALUE. Repeatedly
+// call AddBit to add a new bit to the end, and return the
+// hash of the resulting string. DelBit deletes the last
+// bit, and must be passed the last bit of the most recent
+// string hashed. The macros should be passed these:
+// uint64 s[32]; //buffer
+// static uint64 n; //current string length
+// uint64 t, i, h; //temporary
+// const uint64 CHECKVALUE = 0xCCA4220FC78D45E0;
+
+/*
+ * create a glowworm hash
+ * data    : pointer to data to hash
+ * dataLen : length of data to hash in bytes
+ * return hash (uint64) on success
+ */ 
+uint64 glowwormHash(char* data, uint64 dataLen) {
+    //const uint64 CHECKVALUE = 0xCCA4220FC78D45E0;
+    uint64 s[32]; //buffer
+    uint64 n; //current string length
+    uint64 t, h; //temporary
+
+    glowwormInit(s,n,t,h);
+    //assert(h == CHECKVALUE);
+
+    for (int idx = 0; idx < dataLen; idx++) {
+        char currByte = data[idx];
+        for (int bIdx = 7; bIdx >= 0; bIdx--) {
+            uint64 bit = (((currByte & (1<<bIdx))>>bIdx) == 0) ? 0 : 1;
+            h = glowwormAddBit(bit,s,n,t);
+        }
+    }
+    return h;
+}
+
+
+/* verify song metadata using the metadata hash from the song in the shared buffer
  * returns 0 on success, -1 otherwise
  */
 int verify_song() {
-    char mdHmac[HMAC_SZ];
-    memcpy(mdHmac, (void *)(c->song.mdHmac), HMAC_SZ);
-    u32 all_md_len = AES_BLK_SZ + sizeof(int)*2 + MD_SZ;
+    uint64 mdHash = c->song.mdHash;
 
     mb_printf("Verifying Audio File...\r\n");
-    char* data[1];
-    data[0] = c->song.iv;
-    int dataLens[1];
-    dataLens[0] = all_md_len;
-    if (verify_hmac(s.hmacMdKey, HMAC_MD_KEY_SZ, 1, data, dataLens, mdHmac) != 0) {
+    uint64 dataLen = AES_BLK_SZ + sizeof(int) + sizeof(int) + MD_SZ + HMAC_MD_KEY_SZ;
+    char data[dataLen];
+    memcpy(data, c->song.iv, dataLen-HMAC_MD_KEY_SZ);
+    memcpy(data+dataLen-HMAC_MD_KEY_SZ, s.hmacMdKey, HMAC_MD_KEY_SZ);
+    uint64 hash = glowwormHash(data, dataLen);
+
+    if (mdHash != hash) {
         mb_printf("Verification Failed\r\n");
-        return -1;
-    }
-    mb_printf("Successfully Verified Audio File\r\n");
-    return 0;
-}
-
-
-/* update the metadata HMAC for a song in the shared memory
- * HMAC uses [AES IV + num chunks + enc audio len + song MD]
- * return 0 on success, -1 otherwise
- * 
- * out      : pointer to buffer to store created hmac
- * new_md   : pointer to newly generated metadata
- */
-int create_hmac(char* out, char* new_md) {
-    if (out == NULL || new_md == NULL) {
-        return -1;
-    }
-    Hmac hmac;
-    if (wc_HmacSetKey(&hmac, SHA256, s.hmacMdKey, HMAC_MD_KEY_SZ) != 0) {
-        return -1;
-    }
-
-    char* ptrIv = c->song.iv;
-    char* data[4] = { ptrIv, ptrIv+AES_BLK_SZ, ptrIv+AES_BLK_SZ+sizeof(int), new_md };
-    int lens[4] = { AES_BLK_SZ, sizeof(int), sizeof(int), MD_SZ };
-
-    for (int i = 0; i < 4; i++) {
-        if (wc_HmacUpdate(&hmac, data[i], lens[i]) != 0) {
-            return -1;
-        }
-    }
-    if (wc_HmacFinal(&hmac, out) != 0) {
         return -1;
     }
     return 0;
@@ -331,7 +319,6 @@ void login() {
     if (s.logged_in) {
         mb_printf("Already logged in. Please log out first.\r\n");
     } else {
-        // TODO: modify provisioning tools to disallow duplicate usernames & IDs
         for (int i = 0; i < NUM_PROVISIONED_USERS; i++) {
             // search for matching username
             if (!strcmp(s.username, USERNAMES[PROVISIONED_UIDS[i]])) {
@@ -466,16 +453,12 @@ void share_song() {
     c->song.md.md_size++;
     c->song.md.buf[s.song_md.num_regions + c->song.md.num_users++] = uid;
 
-    // update metadata HMAC and copy it into the file in the shared memory
-    char newMd[MD_SZ];
-    memcpy(newMd, (char*)&c->song.md, MD_SZ);
-    char newHmac[HMAC_SZ];
-    if (create_hmac(newHmac, newMd) != 0) {
-        mb_printf("Cannot share song\r\n");
-        c->song.wav_size = 0;
-        return;
-    }
-    memcpy(c->song.mdHmac, newHmac, HMAC_SZ);
+    // update metadata hash and copy it into the file in the shared memory
+    uint64 dataLen = AES_BLK_SZ + sizeof(int) + sizeof(int) + MD_SZ + HMAC_MD_KEY_SZ;
+    char data[dataLen];
+    memcpy(data, c->song.iv, dataLen-HMAC_MD_KEY_SZ);
+    memcpy(data+dataLen-HMAC_MD_KEY_SZ, s.hmacMdKey, HMAC_MD_KEY_SZ);
+    c->song.mdHash = glowwormHash(data, dataLen);
 
     // with a max of 32 different regions and 64 different users, the max size
     // of the song metadata is 100 bytes. We preallocate 100 bytes for song metadata
@@ -496,10 +479,6 @@ void play_song() {
     // rem is the bytes of audio remaining to play during the play loop
     // we need rem to be signed so we can check if under 0
     int rem;
-
-    // save a copy of the metadata HMAC
-    char mdHmac[HMAC_SZ];
-    memcpy(mdHmac, (void *)(c->song.mdHmac), HMAC_SZ);
 
     mb_printf("Reading Audio File...\r\n");
     // verify and load song md
@@ -617,17 +596,19 @@ void play_song() {
             memcpy(iv, (get_drm_song(c->song) + lenAudio - rem - AES_BLK_SZ), AES_BLK_SZ);
         }
 
-        // verify chunk using HMAC
-        /*char* data2[2];
-        data2[0] = get_drm_song(c->song) + lenAudio - rem;
-        data2[1] = origIv;
-        int dataLens2[2];
-        dataLens2[0] = cp_num;
-        dataLens2[1] = AES_BLK_SZ;
-        if (verify_hmac(s.hmacChunkKey, HMAC_CHUNK_KEY_SZ, 2, data2, dataLens2, get_drm_hmac(c->song, chunknum++)) != 0) {
+        // verify chunk using glowworm hash
+        uint64* hashes = get_drm_hashes(c->song);
+        uint64 chunkHash = hashes[chunknum++];
+        uint64 dataLen = cp_num + AES_BLK_SZ + HMAC_CHUNK_KEY_SZ;
+        char data[dataLen];
+        memcpy(data, (get_drm_song(c->song) + lenAudio - rem), cp_num);
+        memcpy(data+cp_num, origIv, AES_BLK_SZ);
+        memcpy(data+cp_num+AES_BLK_SZ, s.hmacChunkKey, HMAC_CHUNK_KEY_SZ);
+        uint64 hash = glowwormHash(data, dataLen);
+        if (chunkHash != hash) {
             mb_printf("Failed to play audio\r\n");
             return;
-        }*/chunknum++; // DELETE THIS LINE WHEN UNCOMMENTING ABOVE
+        }
 
         // decrypt chunk
         ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, s.aesKey, (word32)AES_KEY_SZ, iv);
@@ -664,7 +645,7 @@ void play_song() {
         cp_xfil_cnt = cp_num;
 
         while (cp_xfil_cnt > 0) {
-            //mb_printf("rem %u, cp_num %u, cp_xfil_cnt %u offset %u, fifofill %u", rem, cp_num, cp_xfil_cnt, offset, *fifo_fill);
+            mb_printf("rem %u, cp_num %u, cp_xfil_cnt %u offset %u, fifofill %u\r\n", rem, cp_num, cp_xfil_cnt, offset, *fifo_fill);
             // polling while loop to wait for DMA to be ready
             // DMA must run first for this to yield the proper state
             // rem != lenAudio checks for first run
@@ -680,7 +661,7 @@ void play_song() {
                 dma_cnt = cp_xfil_cnt;
                 paused = FALSE;
             }
-            //mb_printf("%u", dma_cnt);
+            mb_printf("%u\r\n", dma_cnt);
             fnAudioPlay(sAxiDma, offset, dma_cnt);
             cp_xfil_cnt -= dma_cnt;
         }
@@ -699,6 +680,7 @@ void play_song() {
 // on error, set c->song.wav_size = 0 to notify DRM
 // note: implementation mirrors play_song()
 void digital_out() {
+    mb_printf("sizeof(uint64): %d\r\n", sizeof(uint64));
     if (verify_song() != 0) {
         mb_printf("Cannot dump song\r\n");
         c->song.wav_size = 0;
@@ -724,7 +706,7 @@ void digital_out() {
     int chunknum = 0;
 
     // remove all metadata size from file sizes to reflect audio only
-    unsigned int all_md_len = HMAC_SZ + AES_BLK_SZ + sizeof(int)*2 + MD_SZ + nchunks*HMAC_SZ;
+    unsigned int all_md_len = sizeof(uint64) + AES_BLK_SZ + sizeof(int)*2 + MD_SZ + nchunks*sizeof(uint64);
     file_size -= all_md_len;
     wav_size -= all_md_len;
 
@@ -748,18 +730,19 @@ void digital_out() {
         // calculate write size and offset
         cp_num = (rem > CHUNK_SZ) ? CHUNK_SZ : rem;
 
-        // verify chunk using HMAC
-        /*char* data2[2];
-        data2[0] = get_drm_song(c->song) + lenAudio - rem;
-        data2[1] = origIv;
-        int dataLens2[2];
-        dataLens2[0] = cp_num;
-        dataLens2[1] = AES_BLK_SZ;
-        if (verify_hmac(s.hmacChunkKey, HMAC_CHUNK_KEY_SZ, 2, data2, dataLens2, get_drm_hmac(c->song, chunknum++)) != 0) {
+        // verify chunk using glowworm hash
+        uint64* hashes = get_drm_hashes(c->song);
+        uint64 chunkHash = hashes[chunknum++];
+        uint64 dataLen = cp_num + AES_BLK_SZ + HMAC_CHUNK_KEY_SZ;
+        char data[dataLen];
+        memcpy(data, (get_drm_song(c->song) + lenAudio - rem), cp_num);
+        memcpy(data+cp_num, origIv, AES_BLK_SZ);
+        memcpy(data+cp_num+AES_BLK_SZ, s.hmacChunkKey, HMAC_CHUNK_KEY_SZ);
+        uint64 hash = glowwormHash(data, dataLen);
+        if (chunkHash != hash) {
             mb_printf("Failed to dump song\r\n");
-            c->song.wav_size = 0;
             return;
-        }*/chunknum++; // DELETE THIS LINE WHEN UNCOMMENTING ABOVE
+        }
 
         // decrypt chunk
         ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, s.aesKey, AES_KEY_SZ, iv);
@@ -800,7 +783,7 @@ void digital_out() {
     mb_printf("Preparing song (%dB)...\r\n", wav_size);
     c->song.file_size = file_size;
     c->song.wav_size = wav_size;
-    memmove(&c->song.mdHmac, get_drm_song(c->song), c->song.wav_size);
+    memmove((char*)&c->song.mdHash, get_drm_song(c->song), c->song.wav_size);
 
     mb_printf("Song dump finished\r\n");
 } // end digital_out()

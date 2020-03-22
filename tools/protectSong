@@ -19,6 +19,53 @@ from Cryptodome.Util.Padding import pad
 
 CHUNK_SZ = 16000
 
+
+'''
+n - length of the last string hashed
+s - ring buffer used for the internal state (32 words - 2048 bits)
+      an element s[i] is a 64-bit word, which is the ith element of the buffer,
+      wrapping around if necessary, when the index i becomes too large for the
+      buffer
+'''
+
+def glowwormAddBit(b, s, n, t):
+   if b == 1:
+      t = s[n % 32] ^ 0xffffffff
+   else:
+      t = s[n % 32] ^ 0
+   t = (t|(t>>1 & 0xffffffffffffffff)) ^ (t<<1 & 0xffffffffffffffff)
+   t ^= (t>>4 & 0xffffffffffffffff) ^ (t>>8 & 0xffffffffffffffff) ^ (t>>16 & 0xffffffffffffffff) ^ (t>>32 & 0xffffffffffffffff)
+   n = n + 1
+   s[n % 32] = s[n % 32] ^ t
+   h = s[n % 32] & 0xffffffffffffffff
+   return h, s, n, t
+
+def glowwormInit(s, n, t, h):
+   for i in range(4096):
+      h, s, n, t = glowwormAddBit((h & 1), s, n, t)
+   return s, n, t, h
+
+def glowwormHash(data, dataLen):
+   CHECKVALUE = 0xCCA4220FC78D45E0
+   s = [0] * 32
+   h = 1
+   n = 0
+   t = 0
+
+   s, n, t, h = glowwormInit(s, n, t, h)
+   assert(h == CHECKVALUE)
+   
+   for idx in range(dataLen):
+      currByte = data[idx]
+      for bIdx in range(7, -1, -1):
+         if ((currByte & (1<<bIdx))>>bIdx) == 0:
+            bit = 0
+         else:
+            bit = 1
+         h, s, n, t = glowwormAddBit(bit,s,n,t)
+
+   return h
+
 class ProtectedSong(object):
     """Example song object for protected song"""
 
@@ -65,31 +112,35 @@ class ProtectedSong(object):
         nChunksBytes = (numChunks).to_bytes(4, byteorder='little', signed=False)
         eAudioLenBytes = len(enc_audio).to_bytes(4, byteorder='little', signed=False)
 
-        chunkHmacs = []        
+        chunkHashes = [bytes()] * numChunks      
 
+        print('Hashing chunks (this will take awhile)...')
         for i in range(1, numChunks+1):
-            # CHUNK_SZ + iv bytes
-            h = HMAC.new(hmacKey2,enc_audio[(i*CHUNK_SZ)-CHUNK_SZ:i*CHUNK_SZ]+cipher.iv, digestmod=SHA256).digest()
-            chunkHmacs.append(h)
+            # create glowworm hash of [enc audio chunk + iv + chunk key]
+            chunk = enc_audio[(i*CHUNK_SZ)-CHUNK_SZ:i*CHUNK_SZ]
+            data = chunk + cipher.iv + hmacKey2
+            dataLen = len(chunk) + len(cipher.iv) + len(hmacKey2)
+            glowworm_chunk_hash = glowwormHash(data, dataLen).to_bytes(8, byteorder='little', signed=False)
+            print(glowworm_chunk_hash)
+            chunkHashes[i-1] = glowworm_chunk_hash
+        
+        # create glowworm hash of [iv + nchunks + e_audio_len + MD + metadata key]
+        data = cipher.iv + nChunksBytes + eAudioLenBytes + self.metadata + hmacKey1
+        dataLen = len(cipher.iv) + len(nChunksBytes) + len(eAudioLenBytes) + len(self.metadata) + len(hmacKey1)
+        glowworm_md_hash = glowwormHash(data, dataLen).to_bytes(8, byteorder='little', signed=False)
+        print('success')
 
-        # create hmac of [iv + nchunks + e_audio_len + MD]
-        h = HMAC.new(hmacKey1, cipher.iv, digestmod=SHA256)
-        h.update(nChunksBytes)
-        h.update(eAudioLenBytes)
-        h.update(self.metadata)
-        #h.update(enc_audio)
-        #for hmac in chunkHmacs:
-        #    h.update(hmac)
-
+        print('Writing everything to .drm file...')
         # write everything to file
-        protected_wav.writeframes(h.digest())
+        protected_wav.writeframes(glowworm_md_hash)
         protected_wav.writeframes(cipher.iv)
         protected_wav.writeframes(nChunksBytes)
         protected_wav.writeframes(eAudioLenBytes)
         protected_wav.writeframes(self.metadata)
         protected_wav.writeframes(enc_audio)
-        for hmac in chunkHmacs:
-            protected_wav.writeframes(hmac)
+        print(chunkHashes[0])
+        for gwhash in chunkHashes:
+            protected_wav.writeframes(gwhash)
 
         protected_wav.close()
 
