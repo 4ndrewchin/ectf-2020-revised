@@ -6,7 +6,6 @@ Use: Once per device
 import os
 import json
 from argparse import ArgumentParser
-from Cryptodome.PublicKey import RSA
 from base64 import b64decode, b64encode
 
 
@@ -53,25 +52,25 @@ def main(region_names, user_names, user_secrets, region_secrets, device_dir, reg
     aes_key = aes.read(32)
     aes.close()
 
-    # get HMAC metadata key
+    # get glowworm metadata key
     try:
-        hmacmd_path = os.path.abspath(get_path(region_secrets_path)+'hmac_md_key')
-        hmac_md = open(hmacmd_path, 'rb')
+        mdPath = os.path.abspath(get_path(region_secrets_path)+'md_key')
+        mdKeyFd = open(mdPath, 'rb')
     except Exception as e:
-        print('Unable to open hmac_md_key file: {e}'.format(e=e))
+        print('Unable to open md_key file: {e}'.format(e=e))
         return
-    hmac_md_key = hmac_md.read(32)
-    hmac_md.close()
+    mdKey = mdKeyFd.read(32)
+    mdKeyFd.close()
 
-    # get HMAC song chunks key
+    # get glowworm chunk key
     try:
-        hmacchunk_path = os.path.abspath(get_path(region_secrets_path)+'hmac_chunk_key')
-        hmac_chunk = open(hmacchunk_path, 'rb')
+        chunkPath = os.path.abspath(get_path(region_secrets_path)+'chunk_key')
+        chunkKeyFd = open(chunkPath, 'rb')
     except Exception as e:
-        print('Unable to open hmac_chunk_key file: {e}'.format(e=e))
+        print('Unable to open chunk_key file: {e}'.format(e=e))
         return
-    hmac_chunk_key = hmac_chunk.read(32)
-    hmac_chunk.close()
+    chunkKey = chunkKeyFd.read(32)
+    chunkKeyFd.close()
 
     # write secrets
     device_secrets.write(f'''
@@ -103,13 +102,13 @@ const char *PROVISIONED_PINS[] = {{ {", ".join(['"' + user_secrets[u]['pin'] + '
 #define b64AES_KEY_SZ {len(b64encode(aes_key))}
 const char *AES_KEY = {'"'+str(b64encode(aes_key)).strip("b'")+'"'};
 
-#define HMAC_MD_KEY_SZ {len(hmac_md_key)}
-#define b64HMAC_MD_KEY_SZ {len(b64encode(hmac_md_key))}
-const char *HMAC_MD_KEY = {'"'+str(b64encode(hmac_md_key)).strip("b'")+'"'};
+#define MD_KEY_SZ {len(mdKey)}
+#define b64MD_KEY_SZ {len(b64encode(mdKey))}
+const char *MD_KEY = {'"'+str(b64encode(mdKey)).strip("b'")+'"'};
 
-#define HMAC_CHUNK_KEY_SZ {len(hmac_chunk_key)}
-#define b64HMAC_CHUNK_KEY_SZ {len(b64encode(hmac_chunk_key))}
-const char *HMAC_CHUNK_KEY = {'"'+str(b64encode(hmac_chunk_key)).strip("b'")+'"'};
+#define CHUNK_KEY_SZ {len(chunkKey)}
+#define b64CHUNK_KEY_SZ {len(b64encode(chunkKey))}
+const char *CHUNK_KEY = {'"'+str(b64encode(chunkKey)).strip("b'")+'"'};
 
 #endif // SECRETS_H
 ''')

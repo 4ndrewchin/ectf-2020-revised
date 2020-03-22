@@ -9,7 +9,6 @@ import sys
 import string
 import re
 from argparse import ArgumentParser
-from Cryptodome.PublicKey import RSA
 from Cryptodome.Cipher import AES
 from Cryptodome.Random import get_random_bytes
 
@@ -27,34 +26,34 @@ def main(region_dict, file_name):
 
     print("generating cryptographic keys")
 
-    # Key for metadata and song
+    # Key for metadata hashes
     key1 = get_random_bytes(32)
     try:
-        hmacKey1 = open(os.path.abspath(dir+'hmac_md_key'), 'wb')
+        mdKey = open(os.path.abspath(dir+'md_key'), 'wb')
         try:
-            hmacKey1.write(key1)
+            mdKey.write(key1)
         except Exception as e:
-            print("Failed to write to hmac_md_key file: %s" % (e,))
+            print("Failed to write to md_key file: %s" % (e,))
             sys.exit(e)
     except Exception as e:
-        print("Unable to open hmac_md_key file: %s" % (e,))
+        print("Unable to open md_key file: %s" % (e,))
         sys.exit(e)
 
-    hmacKey1.close()
+    mdKey.close()
 
-    # Key for hashes
+    # Key for chunk hashes
     key2 = get_random_bytes(32)
     try:
-        hmacKey2 = open(os.path.abspath(dir+'hmac_chunk_key'), 'wb')
+        chunkKey = open(os.path.abspath(dir+'chunk_key'), 'wb')
         try:
-            hmacKey2.write(key2)
+            chunkKey.write(key2)
         except Exception as e:
-            print("Failed to write to hmac_chunk_key file: %s" % (e,))
+            print("Failed to write to chunk_key file: %s" % (e,))
             sys.exit(e)
     except Exception as e:
-        print("Unable to open hmac_chunk_key file: %s" % (e,))
+        print("Unable to open chunk_key file: %s" % (e,))
         sys.exit(e)
-    hmacKey2.close()
+    chunkKey.close()
 
     #AES
     try:

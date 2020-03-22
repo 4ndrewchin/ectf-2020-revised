@@ -12,9 +12,7 @@ import base64
 from argparse import ArgumentParser
 import numpy as np
 from Cryptodome.Cipher import AES
-from Cryptodome.PublicKey import RSA
-from Cryptodome.Signature import pss
-from Cryptodome.Hash import SHA256, HMAC
+from Cryptodome.Hash import SHA256
 from Cryptodome.Util.Padding import pad
 
 CHUNK_SZ = 16000
@@ -94,14 +92,14 @@ class ProtectedSong(object):
         aes_key = aes.read(32)
         aes.close()
 
-        # read HMAC keys
-        hmacKey1File = open(os.path.abspath(self.path_to_keys+'hmac_md_key'),'rb')
-        hmacKey1 = hmacKey1File.read()
-        hmacKey1File.close()
+        # read glowworm hash keys
+        mdKeyFile = open(os.path.abspath(self.path_to_keys+'md_key'),'rb')
+        mdKey = mdKeyFile.read()
+        mdKeyFile.close()
 
-        hmacKey2File = open(os.path.abspath(self.path_to_keys+'hmac_chunk_key'),'rb')
-        hmacKey2 = hmacKey2File.read()
-        hmacKey2File.close()
+        chunkKeyFile = open(os.path.abspath(self.path_to_keys+'chunk_key'),'rb')
+        chunkKey = chunkKeyFile.read()
+        chunkKeyFile.close()
 
         # encrypt audio data using AES-256
         cipher = AES.new(aes_key, AES.MODE_CBC)
@@ -118,15 +116,14 @@ class ProtectedSong(object):
         for i in range(1, numChunks+1):
             # create glowworm hash of [enc audio chunk + iv + chunk key]
             chunk = enc_audio[(i*CHUNK_SZ)-CHUNK_SZ:i*CHUNK_SZ]
-            data = chunk + cipher.iv + hmacKey2
-            dataLen = len(chunk) + len(cipher.iv) + len(hmacKey2)
+            data = chunk + cipher.iv + chunkKey
+            dataLen = len(chunk) + len(cipher.iv) + len(chunkKey)
             glowworm_chunk_hash = glowwormHash(data, dataLen).to_bytes(8, byteorder='little', signed=False)
-            print(glowworm_chunk_hash)
             chunkHashes[i-1] = glowworm_chunk_hash
         
         # create glowworm hash of [iv + nchunks + e_audio_len + MD + metadata key]
-        data = cipher.iv + nChunksBytes + eAudioLenBytes + self.metadata + hmacKey1
-        dataLen = len(cipher.iv) + len(nChunksBytes) + len(eAudioLenBytes) + len(self.metadata) + len(hmacKey1)
+        data = cipher.iv + nChunksBytes + eAudioLenBytes + self.metadata + mdKey
+        dataLen = len(cipher.iv) + len(nChunksBytes) + len(eAudioLenBytes) + len(self.metadata) + len(mdKey)
         glowworm_md_hash = glowwormHash(data, dataLen).to_bytes(8, byteorder='little', signed=False)
         print('success')
 
@@ -138,7 +135,6 @@ class ProtectedSong(object):
         protected_wav.writeframes(eAudioLenBytes)
         protected_wav.writeframes(self.metadata)
         protected_wav.writeframes(enc_audio)
-        print(chunkHashes[0])
         for gwhash in chunkHashes:
             protected_wav.writeframes(gwhash)
 

@@ -217,12 +217,12 @@ int init_cryptkeys() {
     if (Base64_Decode((void *)AES_KEY, (word32)b64AES_KEY_SZ, (void *)s.aesKey, &outLen) != 0) {
         return -1;
     }
-    outLen = b64HMAC_MD_KEY_SZ;
-    if (Base64_Decode((void *)HMAC_MD_KEY, (word32)b64HMAC_MD_KEY_SZ, (void *)s.hmacMdKey, &outLen) != 0) {
+    outLen = b64MD_KEY_SZ;
+    if (Base64_Decode((void *)MD_KEY, (word32)b64MD_KEY_SZ, (void *)s.mdKey, &outLen) != 0) {
         return -1;
     }
-    outLen = b64HMAC_CHUNK_KEY_SZ;
-    if (Base64_Decode((void *)HMAC_CHUNK_KEY, (word32)b64HMAC_CHUNK_KEY_SZ, (void *)s.hmacChunkKey, &outLen) != 0) {
+    outLen = b64CHUNK_KEY_SZ;
+    if (Base64_Decode((void *)CHUNK_KEY, (word32)b64CHUNK_KEY_SZ, (void *)s.chunkKey, &outLen) != 0) {
         return -1;
     }
     return 0;
@@ -293,10 +293,10 @@ int verify_song() {
     uint64 mdHash = c->song.mdHash;
 
     mb_printf("Verifying Audio File...\r\n");
-    uint64 dataLen = AES_BLK_SZ + sizeof(int) + sizeof(int) + MD_SZ + HMAC_MD_KEY_SZ;
+    uint64 dataLen = AES_BLK_SZ + sizeof(int) + sizeof(int) + MD_SZ + MD_KEY_SZ;
     char data[dataLen];
-    memcpy(data, c->song.iv, dataLen-HMAC_MD_KEY_SZ);
-    memcpy(data+dataLen-HMAC_MD_KEY_SZ, s.hmacMdKey, HMAC_MD_KEY_SZ);
+    memcpy(data, c->song.iv, dataLen-MD_KEY_SZ);
+    memcpy(data+dataLen-MD_KEY_SZ, s.mdKey, MD_KEY_SZ);
     uint64 hash = glowwormHash(data, dataLen);
 
     if (mdHash != hash) {
@@ -454,10 +454,10 @@ void share_song() {
     c->song.md.buf[s.song_md.num_regions + c->song.md.num_users++] = uid;
 
     // update metadata hash and copy it into the file in the shared memory
-    uint64 dataLen = AES_BLK_SZ + sizeof(int) + sizeof(int) + MD_SZ + HMAC_MD_KEY_SZ;
+    uint64 dataLen = AES_BLK_SZ + sizeof(int) + sizeof(int) + MD_SZ + MD_KEY_SZ;
     char data[dataLen];
-    memcpy(data, c->song.iv, dataLen-HMAC_MD_KEY_SZ);
-    memcpy(data+dataLen-HMAC_MD_KEY_SZ, s.hmacMdKey, HMAC_MD_KEY_SZ);
+    memcpy(data, c->song.iv, dataLen-MD_KEY_SZ);
+    memcpy(data+dataLen-MD_KEY_SZ, s.mdKey, MD_KEY_SZ);
     c->song.mdHash = glowwormHash(data, dataLen);
 
     // with a max of 32 different regions and 64 different users, the max size
@@ -599,11 +599,11 @@ void play_song() {
         // verify chunk using glowworm hash
         uint64* hashes = get_drm_hashes(c->song);
         uint64 chunkHash = hashes[chunknum++];
-        uint64 dataLen = cp_num + AES_BLK_SZ + HMAC_CHUNK_KEY_SZ;
+        uint64 dataLen = cp_num + AES_BLK_SZ + CHUNK_KEY_SZ;
         char data[dataLen];
         memcpy(data, (get_drm_song(c->song) + lenAudio - rem), cp_num);
         memcpy(data+cp_num, origIv, AES_BLK_SZ);
-        memcpy(data+cp_num+AES_BLK_SZ, s.hmacChunkKey, HMAC_CHUNK_KEY_SZ);
+        memcpy(data+cp_num+AES_BLK_SZ, s.chunkKey, CHUNK_KEY_SZ);
         uint64 hash = glowwormHash(data, dataLen);
         if (chunkHash != hash) {
             mb_printf("Failed to play audio\r\n");
@@ -733,11 +733,11 @@ void digital_out() {
         // verify chunk using glowworm hash
         uint64* hashes = get_drm_hashes(c->song);
         uint64 chunkHash = hashes[chunknum++];
-        uint64 dataLen = cp_num + AES_BLK_SZ + HMAC_CHUNK_KEY_SZ;
+        uint64 dataLen = cp_num + AES_BLK_SZ + CHUNK_KEY_SZ;
         char data[dataLen];
         memcpy(data, (get_drm_song(c->song) + lenAudio - rem), cp_num);
         memcpy(data+cp_num, origIv, AES_BLK_SZ);
-        memcpy(data+cp_num+AES_BLK_SZ, s.hmacChunkKey, HMAC_CHUNK_KEY_SZ);
+        memcpy(data+cp_num+AES_BLK_SZ, s.chunkKey, CHUNK_KEY_SZ);
         uint64 hash = glowwormHash(data, dataLen);
         if (chunkHash != hash) {
             mb_printf("Failed to dump song\r\n");

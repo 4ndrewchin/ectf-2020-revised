@@ -64,14 +64,14 @@ Args:
 
 ### unprotectSong
 Syntax:
-> ./unprotectSong --outfile <PATH_TO_OUTPUT_SONG> --infile <PATH_TO_SONG> --aes <PATH_TO_AES_KEY> --mdKey <PATH_TO_HMAC_METADATA_KEY> --chunkKey <PATH_TO_HMAC_CHUNK_KEY>
+> ./unprotectSong --outfile <PATH_TO_OUTPUT_SONG> --infile <PATH_TO_SONG> --aes <PATH_TO_AES_KEY> --mdKey <PATH_TO_METADATA_KEY> --chunkKey <PATH_TO_CHUNK_KEY>
 
 Args:
 - <PATH_TO_OUTPUT_SONG> : the absolute or relative path to save the output song to.
 - <PATH_TO_SONG> : the absolute or relative path to the input song to unprotect.
 - <PATH_TO_AES_KEY> : the absolute or relative path to the 256-bit AES key file to decrypt the song with.
-- <PATH_TO_HMAC_METADATA_KEY> : the absolute or relative path to the 256-bit HMAC key file to verify the metadata HMACs with.
-- <PATH_TO_HMAC_CHUNK_KEY> : the absolute or relative path to the 256-bit HMAC key file to verify the audio chunk HMACs with.
+- <PATH_TO_METADATA_KEY> : the absolute or relative path to the 256-bit key file to use for glowworm metadata hashes.
+- <PATH_TO_CHUNK_KEY> : the absolute or relative path to the 256-bit key file to use for glowworm chunk hashes.
 
 ### verifyDigitalOut
 Syntax:

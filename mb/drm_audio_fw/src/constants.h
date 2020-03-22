@@ -80,9 +80,9 @@ start
 | WAV file format metadata   |
 | (44 bytes)                 |
 |____________________________|
-| Song metadata glowworm     |
-| hash                       | ----> created using
-| (8 bytes)                 |       metadata key
+| Song metadata + key        |
+| glowworm hash              |
+| (8 bytes)                  |
 |____________________________|
 | AES CBC Initialization     |
 | Vector                     |
@@ -103,19 +103,16 @@ start
 |  = 2098 16000B chunks      |
 |____________________________| ___
 | Encrypted Audio Chunk #0   |    |
-| + IV glowworm hash         |    |
+| + IV + key glowworm hash   |    |
 | (8 bytes)                  |    |
 |____________________________|    |
-|            ...             |    |--> created using
-|____________________________|    |    chunk key
-| Encrypted Audio Chunk #n   |    |    (max of 2098 hashes
-| + IV glowworm hash         |    |     = 64 KB total)
+|            ...             |    |--> max of 2098 hashes
+|____________________________|    |    = 64 KB total
+| Encrypted Audio Chunk #n   |    |
+| + IV + key glowworm hash   |    |
 | (8 bytes)                  |    |
 |____________________________| ___|
 end
-
-- All HMACs use the SHA256 hash algorithm
-- Each Chunk HMAC is created from the encrypted chunk + AESIV
 
 MAX DRM FILE SIZE = 
    32 MB song --> (44 + 8 + 16 + 4 + 4 + 100 + 33,554,432 + (2098 * 8)) = 33571392
@@ -185,8 +182,8 @@ typedef struct {
     char pin[MAX_PIN_SZ];           // logged on pin
     song_md song_md;                // current song metadata
     char aesKey[44];                // base64 decoded AES key
-    char hmacMdKey[44];             // base64 decoded HMAC metadata key
-    char hmacChunkKey[44];          // base64 decoded HMAC encrypted audio chunk key
+    char mdKey[44];                 // base64 decoded metadata key
+    char chunkKey[44];              // base64 decoded encrypted audio chunk key
 } internal_state;
 
 

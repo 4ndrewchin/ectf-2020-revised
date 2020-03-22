@@ -21,6 +21,12 @@ extern "C" {
 #undef  HAVE_THREAD_LS
 #define HAVE_THREAD_LS
 
+#undef  TFM_NO_ASM
+#define TFM_NO_ASM
+
+#undef  WOLFSSL_NO_ASM
+#define WOLFSSL_NO_ASM
+
 #undef  WC_NO_RNG
 #define WC_NO_RNG
 
@@ -39,11 +45,23 @@ extern "C" {
 #undef  NO_OLD_TLS
 #define NO_OLD_TLS
 
-#undef  WC_RSA_PSS
-#define WC_RSA_PSS
+#undef  NO_WOLFSSL_MEMORY
+#define NO_WOLFSSL_MEMORY
+
+#undef  NO_RSA
+#define NO_RSA
 
 #undef  NO_DH
 #define NO_DH
+
+#undef  NO_ASN
+#define NO_ASN
+
+#undef  NO_CERTS
+#define NO_CERTS
+
+#undef  NO_BIG_INT
+#define NO_BIG_INT
 
 #undef  NO_RC4
 #define NO_RC4
@@ -60,11 +78,17 @@ extern "C" {
 #undef  NO_RABBIT
 #define NO_RABBIT
 
+#undef  NO_CHACHA_ASM
+#define NO_CHACHA_ASM
+
 #undef  WC_NO_HASHDRBG
 #define WC_NO_HASHDRBG
 
 #undef  NO_FILESYSTEM
 #define NO_FILESYSTEM
+
+#undef  NO_INLINE
+#define NO_INLINE
 
 #undef  HAVE_ENCRYPT_THEN_MAC
 #define HAVE_ENCRYPT_THEN_MAC
@@ -86,6 +110,18 @@ extern "C" {
 
 #undef  WC_NO_ASYNC_THREADING
 #define WC_NO_ASYNC_THREADING
+
+#undef  NO_OLD_RNGNAME
+#define NO_OLD_RNGNAME
+
+#undef  NO_OLD_WC_NAMES
+#define NO_OLD_WC_NAMES
+
+#undef  NO_OLD_SSL_NAMES
+#define NO_OLD_SSL_NAMES
+
+#undef  NO_OLD_SHA_NAMES
+#define NO_OLD_SHA_NAMES
 
 #undef  NO_DES3
 #define NO_DES3
