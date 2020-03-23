@@ -52,7 +52,7 @@ def main(region_names, user_names, user_secrets, region_secrets, device_dir, reg
     simon_key = simon.read(32)
     simon.close()
 
-    # get glowworm metadata key
+    # get hash metadata key
     try:
         mdPath = os.path.abspath(get_path(region_secrets_path)+'md_key')
         mdKeyFd = open(mdPath, 'rb')
@@ -62,7 +62,7 @@ def main(region_names, user_names, user_secrets, region_secrets, device_dir, reg
     mdKey = mdKeyFd.read(32)
     mdKeyFd.close()
 
-    # get glowworm chunk key
+    # get hash chunk key
     try:
         chunkPath = os.path.abspath(get_path(region_secrets_path)+'chunk_key')
         chunkKeyFd = open(chunkPath, 'rb')

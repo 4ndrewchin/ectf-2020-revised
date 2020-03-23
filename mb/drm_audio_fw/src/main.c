@@ -19,7 +19,7 @@
 #include "wolfssl/wolfcrypt/sha256.h"
 #include "wolfssl/wolfcrypt/coding.h"
 #include "wolfssl/wolfcrypt/wc_encrypt.h"
-#include "wolfssl/wolfcrypt/hmac.h"
+#include "blake3.h"
 
 
 //////////////////////// GLOBALS ////////////////////////
@@ -229,7 +229,7 @@ int init_cryptkeys() {
 }
 
 
-#define glowwormAddBit(b,s,n,t) ( \
+/*#define glowwormAddBit(b,s,n,t) ( \
     t = s[n % 32] ^ ((b) ? 0xffffffff : 0), \
     t = (t|(t>>1)) ^ (t<<1), \
     t ^= (t>>4) ^ (t>>8) ^ (t>>16) ^ (t>>32),\
@@ -246,7 +246,7 @@ int init_cryptkeys() {
     for (int i=0; i<4096; i++) \
         h=glowwormAddBit((h & 1L),s,n,t); \
     n = 0; \
-}
+}*/
 
 
 // Call glowwormInit once, which returns the hash of the
@@ -266,43 +266,104 @@ int init_cryptkeys() {
  * dataLen : length of data to hash in bytes
  * return hash (uint64) on success
  */ 
-uint64 glowwormHash(char* data, uint64 dataLen) {
+/*uint64 glowwormHash(char* data, uint64 dataLen) {
     //const uint64 CHECKVALUE = 0xCCA4220FC78D45E0;
     uint64 s[32]; //buffer
     uint64 n; //current string length
     uint64 t, h; //temporary
 
-    glowwormInit(s,n,t,h);
+    //glowwormInit(s,n,t,h); //shave off 3 seconds with precomputation
+    n = 0;
+    t = (uint64)5699370651900549022;
+    h = (uint64)14745948531085624800;
+    s[0] = (uint64)14745948531085624800;
+    s[1] = (uint64)16120642418826990911;
+    s[2] = (uint64)9275000239821960485;
+    s[3] = (uint64)4476743750426018428;
+    s[4] = (uint64)741912412851399944;
+    s[5] = (uint64)17767459926458528083;
+    s[6] = (uint64)2469478127305654386;
+    s[7] = (uint64)6225995753166195692;
+    s[8] = (uint64)4750461123551357503;
+    s[9] = (uint64)10555348896626929070;
+    s[10] = (uint64)14572814704552083992;
+    s[11] = (uint64)2824678681307928227;
+    s[12] = (uint64)8198425675642015085;
+    s[13] = (uint64)3315257422098907176;
+    s[14] = (uint64)13762405054855287671;
+    s[15] = (uint64)15186990245784674763;
+    s[16] = (uint64)5015234624788364844;
+    s[17] = (uint64)8462123041350221017;
+    s[18] = (uint64)9974233762935842858;
+    s[19] = (uint64)11502466225357323772;
+    s[20] = (uint64)17531649588530077495;
+    s[21] = (uint64)8670185664686319238;
+    s[22] = (uint64)4707560773883213848;
+    s[23] = (uint64)10843017560065197706;
+    s[24] = (uint64)17676146699030180721;
+    s[25] = (uint64)17194224147714809490;
+    s[26] = (uint64)4745306135015590921;
+    s[27] = (uint64)11298931964348737593;
+    s[28] = (uint64)14067901419238702746;
+    s[29] = (uint64)15452291037738416485;
+    s[30] = (uint64)591116246257296967;
+    s[31] = (uint64)15728077675183395515;
     //assert(h == CHECKVALUE);
-
+    
     for (int idx = 0; idx < dataLen; idx++) {
         char currByte = data[idx];
         for (int bIdx = 7; bIdx >= 0; bIdx--) {
-            uint64 bit = (((currByte & (1<<bIdx))>>bIdx) == 0) ? 0 : 1;
+            char bit = (currByte>>bIdx&1);
             h = glowwormAddBit(bit,s,n,t);
         }
     }
     return h;
+}*/
+
+
+/* create a new Blake3 hash
+ * return 0 on success, -1 otherwise
+ *
+ * args     : number of different data to update hmac object with
+ * data     : array of char pointers (data) to create hash with
+ * dataLens : length of each data to be included in hash
+ * key      : pointer to 32-bit key
+ * out      : buffer to store resulting hash
+ */
+int create_hash(int args, char* data[], int dataLens[], char* key, char* out) {
+    if (args <= 0 || data == NULL || dataLens == NULL || key == NULL || out == NULL) {
+        return -1;
+    }
+    blake3_hasher h;
+    blake3_hasher_init_keyed(&h, key);
+    for (int i = 0; i < args; i++) {
+        blake3_hasher_update(&h, data[i], dataLens[i]);
+    }
+    blake3_hasher_finalize(&h, out, BLAKE3_OUT_LEN);
+    return 0;
 }
 
 
-/* verify song metadata using the metadata hash from the song in the shared buffer
+/* verify integrity of a song using the metadata hash from the song in the shared buffer
  * returns 0 on success, -1 otherwise
  */
 int verify_song() {
-    uint64 mdHash = c->song.mdHash;
+    char mdHash[BLAKE3_OUT_LEN];
+    memcpy(mdHash, c->song.mdHash, BLAKE3_OUT_LEN);
 
     mb_printf("Verifying Audio File...\r\n");
-    uint64 dataLen = SIMON_BLK_SZ + sizeof(int) + sizeof(int) + MD_SZ + MD_KEY_SZ;
-    char data[dataLen];
-    memcpy(data, c->song.iv, dataLen-MD_KEY_SZ);
-    memcpy(data+dataLen-MD_KEY_SZ, s.mdKey, MD_KEY_SZ);
-    uint64 hash = glowwormHash(data, dataLen);
-
-    if (mdHash != hash) {
+    char out[BLAKE3_OUT_LEN];
+    char* data[1] = { c->song.iv };
+    int dataLens[1] = { SIMON_BLK_SZ + sizeof(int)*2 + MD_SZ };
+    if (create_hash(1, data, dataLens, s.mdKey, out) != 0) {
         mb_printf("Verification Failed\r\n");
         return -1;
     }
+    if (memcmp(mdHash, out, BLAKE3_OUT_LEN) != 0) {
+        mb_printf("Verification Failed\r\n");
+        return -1;
+    }
+    mb_printf("Successfully Verified Audio File\r\n");
     return 0;
 }
 
@@ -412,6 +473,7 @@ void query_song() {
 // on error, set c->song.wav_size = 0 to notify miPod
 void share_song() {
     char uid;
+    int nchunks = c->song.numChunks;
 
     // reject non-owner attempts to share
     if (!s.logged_in) {
@@ -454,11 +516,15 @@ void share_song() {
     c->song.md.buf[s.song_md.num_regions + c->song.md.num_users++] = uid;
 
     // update metadata hash and copy it into the file in the shared memory
-    uint64 dataLen = SIMON_BLK_SZ + sizeof(int) + sizeof(int) + MD_SZ + MD_KEY_SZ;
-    char data[dataLen];
-    memcpy(data, c->song.iv, dataLen-MD_KEY_SZ);
-    memcpy(data+dataLen-MD_KEY_SZ, s.mdKey, MD_KEY_SZ);
-    c->song.mdHash = glowwormHash(data, dataLen);
+    char* data[1] = { c->song.iv };
+    int dataLens[1] = { BLAKE3_OUT_LEN + SIMON_BLK_SZ + sizeof(int)*2 + MD_SZ + nchunks*BLAKE3_OUT_LEN };
+    char out[BLAKE3_OUT_LEN];
+    if (create_hash(1, data, dataLens, s.mdKey, out) != 0) {
+        mb_printf("Cannot share song\r\n");
+        c->song.wav_size = 0;
+        return;
+    }
+    memcpy(c->song.mdHash, out, BLAKE3_OUT_LEN);
 
     // with a max of 32 different regions and 64 different users, the max size
     // of the song metadata is 100 bytes. We preallocate 100 bytes for song metadata
@@ -596,16 +662,18 @@ void play_song() {
             memcpy(iv, (get_drm_song(c->song) + lenAudio - rem - SIMON_BLK_SZ), SIMON_BLK_SZ);
         }
 
-        // verify chunk using glowworm hash
-        uint64* hashes = get_drm_hashes(c->song);
-        uint64 chunkHash = hashes[chunknum++];
-        uint64 dataLen = cp_num + SIMON_BLK_SZ + CHUNK_KEY_SZ;
-        char data[dataLen];
-        memcpy(data, (get_drm_song(c->song) + lenAudio - rem), cp_num);
-        memcpy(data+cp_num, origIv, SIMON_BLK_SZ);
-        memcpy(data+cp_num+SIMON_BLK_SZ, s.chunkKey, CHUNK_KEY_SZ);
-        uint64 hash = glowwormHash(data, dataLen);
-        if (chunkHash != hash) {
+        // verify chunk using blake3 chunk hash
+        char chunkHash[BLAKE3_OUT_LEN];
+        memcpy(chunkHash, get_drm_hash(c->song, chunknum++), BLAKE3_OUT_LEN);
+
+        char* data[2] = { get_drm_song(c->song) + lenAudio - rem, origIv };
+        int dataLens[2] = { cp_num, SIMON_BLK_SZ };
+        char out[BLAKE3_OUT_LEN];
+        if (create_hash(2, data, dataLens, s.chunkKey, out) != 0) {
+            mb_printf("Failed to play audio\r\n");
+            return;
+        }
+        if (memcmp(chunkHash, out, BLAKE3_OUT_LEN) != 0) {
             mb_printf("Failed to play audio\r\n");
             return;
         }
@@ -680,7 +748,6 @@ void play_song() {
 // on error, set c->song.wav_size = 0 to notify DRM
 // note: implementation mirrors play_song()
 void digital_out() {
-    mb_printf("sizeof(uint64): %d\r\n", sizeof(uint64));
     if (verify_song() != 0) {
         mb_printf("Cannot dump song\r\n");
         c->song.wav_size = 0;
@@ -706,7 +773,7 @@ void digital_out() {
     int chunknum = 0;
 
     // remove all metadata size from file sizes to reflect audio only
-    unsigned int all_md_len = sizeof(uint64) + SIMON_BLK_SZ + sizeof(int)*2 + MD_SZ + nchunks*sizeof(uint64);
+    unsigned int all_md_len = BLAKE3_OUT_LEN + SIMON_BLK_SZ + sizeof(int)*2 + MD_SZ + nchunks*BLAKE3_OUT_LEN;
     file_size -= all_md_len;
     wav_size -= all_md_len;
 
@@ -730,17 +797,19 @@ void digital_out() {
         // calculate write size and offset
         cp_num = (rem > CHUNK_SZ) ? CHUNK_SZ : rem;
 
-        // verify chunk using glowworm hash
-        uint64* hashes = get_drm_hashes(c->song);
-        uint64 chunkHash = hashes[chunknum++];
-        uint64 dataLen = cp_num + SIMON_BLK_SZ + CHUNK_KEY_SZ;
-        char data[dataLen];
-        memcpy(data, (get_drm_song(c->song) + lenAudio - rem), cp_num);
-        memcpy(data+cp_num, origIv, SIMON_BLK_SZ);
-        memcpy(data+cp_num+SIMON_BLK_SZ, s.chunkKey, CHUNK_KEY_SZ);
-        uint64 hash = glowwormHash(data, dataLen);
-        if (chunkHash != hash) {
-            mb_printf("Failed to dump song\r\n");
+        // verify chunk using blake3 chunk hash
+        char chunkHash[BLAKE3_OUT_LEN];
+        memcpy(chunkHash, get_drm_hash(c->song, chunknum++), BLAKE3_OUT_LEN);
+
+        char* data[2] = { get_drm_song(c->song) + lenAudio - rem, origIv };
+        int dataLens[2] = { cp_num, SIMON_BLK_SZ };
+        char out[BLAKE3_OUT_LEN];
+        if (create_hash(2, data, dataLens, s.chunkKey, out) != 0) {
+            mb_printf("Failed to play audio\r\n");
+            return;
+        }
+        if (memcmp(chunkHash, out, BLAKE3_OUT_LEN) != 0) {
+            mb_printf("Failed to play audio\r\n");
             return;
         }
 

@@ -33,7 +33,6 @@
 #define MAX_SONG_SZ (1<<25)
 #define MD_SZ 100
 
-typedef unsigned long long uint64; //64-bit unsigned int
 
 // LED colors and controller
 struct color {
@@ -80,9 +79,9 @@ start
 | WAV file format metadata   |
 | (44 bytes)                 |
 |____________________________|
-| Song metadata + key        |
-| glowworm hash              |
-| (8 bytes)                  |
+| Song metadata keyed Blake3 | ---> use 32-bit
+| Hash                       |      metadata key
+| (32 bytes)                 |
 |____________________________|
 | Simon CBC Initialization   |
 | Vector                     |
@@ -103,19 +102,19 @@ start
 |  = 2098 16000B chunks      |
 |____________________________| ___
 | Encrypted Audio Chunk #0   |    |
-| + IV + key glowworm hash   |    |
-| (8 bytes)                  |    |
+| + IV keyed Blake3 hash     |    |
+| (32 bytes)                 |    |
 |____________________________|    |
 |            ...             |    |--> max of 2098 hashes
-|____________________________|    |    = 64 KB total
-| Encrypted Audio Chunk #n   |    |
-| + IV + key glowworm hash   |    |
-| (8 bytes)                  |    |
+|____________________________|    |    = 64 KB total,
+| Encrypted Audio Chunk #n   |    |    use 32-bit chunk
+| + IV keyed Blake3 hash     |    |    key
+| (32 bytes)                 |    |
 |____________________________| ___|
 end
 
 MAX DRM FILE SIZE = 
-   32 MB song --> (44 + 8 + 16 + 4 + 4 + 100 + 33,554,432 + (2098 * 8)) = 33571392
+   32 MB song --> (44 + 32 + 16 + 4 + 4 + 100 + 33,554,432 + (2098 * 32)) = 33621768
 */
 
 // struct to interpret shared buffer as a drm song file
@@ -127,7 +126,7 @@ typedef struct __attribute__((__packed__)) {
     char packing2[32];
     u32 wav_size;           // size of file
     // drm song metadata
-    uint64 mdHash;          // metadata hash
+    char mdHash[32];        // metadata hash
     char iv[16];            // Simon initialization vector
     int numChunks;          // number of encrypted audio chunks
     int encAudioLen;        // length of encrypted audio
@@ -139,7 +138,7 @@ typedef struct __attribute__((__packed__)) {
 #define get_drm_rids(d) (d.md.buf)
 #define get_drm_uids(d) (d.md.buf + d.md.num_regions)
 #define get_drm_song(d) ((char *)(&d.md) + MD_SZ)
-#define get_drm_hashes(d) (uint64*)(get_drm_song(d) + d.encAudioLen)
+#define get_drm_hash(d, i) (get_drm_song(d) + d.encAudioLen + (i*32))
 
 
 // shared buffer values

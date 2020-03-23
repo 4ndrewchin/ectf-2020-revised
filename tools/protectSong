@@ -9,61 +9,16 @@ import math
 import os
 import wave
 import base64
+import sys
 from argparse import ArgumentParser
 import numpy as np
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import pad
 from Cryptodome.Random import get_random_bytes
 from simon import SimonCipher
+from blake3 import blake3
 
 CHUNK_SZ = 16000
-
-
-'''
-n - length of the last string hashed
-s - ring buffer used for the internal state (32 words - 2048 bits)
-      an element s[i] is a 64-bit word, which is the ith element of the buffer,
-      wrapping around if necessary, when the index i becomes too large for the
-      buffer
-'''
-
-def glowwormAddBit(b, s, n, t):
-   if b == 1:
-      t = s[n % 32] ^ 0xffffffff
-   else:
-      t = s[n % 32] ^ 0
-   t = (t|(t>>1 & 0xffffffffffffffff)) ^ (t<<1 & 0xffffffffffffffff)
-   t ^= (t>>4 & 0xffffffffffffffff) ^ (t>>8 & 0xffffffffffffffff) ^ (t>>16 & 0xffffffffffffffff) ^ (t>>32 & 0xffffffffffffffff)
-   n = n + 1
-   s[n % 32] = s[n % 32] ^ t
-   h = s[n % 32] & 0xffffffffffffffff
-   return h, s, n, t
-
-def glowwormInit(s, n, t, h):
-   for i in range(4096):
-      h, s, n, t = glowwormAddBit((h & 1), s, n, t)
-   return s, n, t, h
-
-def glowwormHash(data, dataLen):
-   CHECKVALUE = 0xCCA4220FC78D45E0
-   s = [0] * 32
-   h = 1
-   n = 0
-   t = 0
-
-   s, n, t, h = glowwormInit(s, n, t, h)
-   assert(h == CHECKVALUE)
-   
-   for idx in range(dataLen):
-      currByte = data[idx]
-      for bIdx in range(7, -1, -1):
-         if ((currByte & (1<<bIdx))>>bIdx) == 0:
-            bit = 0
-         else:
-            bit = 1
-         h, s, n, t = glowwormAddBit(bit,s,n,t)
-
-   return h
 
 class ProtectedSong(object):
     """Example song object for protected song"""
@@ -93,7 +48,7 @@ class ProtectedSong(object):
         simon_key = simon.read(32)
         simon.close()
 
-        # read glowworm hash keys
+        # read blake3 hash keys
         mdKeyFile = open(os.path.abspath(self.path_to_keys+'md_key'),'rb')
         mdKey = mdKeyFile.read()
         mdKeyFile.close()
@@ -103,6 +58,8 @@ class ProtectedSong(object):
         chunkKeyFile.close()
 
         # encrypt audio data using Simon (128 bit blocks, 256 bit key)
+        print('Encrypting audio (this will take a while)...', end='', flush=True)
+        sys.stdout.flush()
         simonkey_int = int.from_bytes(simon_key, byteorder='little', signed='False')
         iv = get_random_bytes(16)
         iv_int = int.from_bytes(iv, byteorder='little', signed='False')
@@ -110,7 +67,6 @@ class ProtectedSong(object):
         padded_audio = pad(bytes(self.full_song), AES.block_size)
         enc_audio = bytes()
         # simon can only encrypt block_size bytes at a time :(
-        print("Encrypting (this will take a while)...", end='')
         for i in range(0,len(padded_audio),AES.block_size):
             enc_simon_chunk = cipher.encrypt(int.from_bytes(padded_audio[i:i+AES.block_size], byteorder='little', signed='False'))
             enc_simon_chunk = enc_simon_chunk.to_bytes(AES.block_size, byteorder='little')
@@ -121,38 +77,41 @@ class ProtectedSong(object):
         nChunksBytes = (numChunks).to_bytes(4, byteorder='little', signed=False)
         eAudioLenBytes = len(enc_audio).to_bytes(4, byteorder='little', signed=False)
 
-        print('success')
+        print('success', flush=True)
 
         chunkHashes = [bytes()] * numChunks      
 
-        print('Hashing chunks (this will take awhile)...', end='')
+        print('Hashing chunks...', end='', flush=True)
         for i in range(1, numChunks+1):
-            # create glowworm hash of [enc audio chunk + iv + chunk key]
+            # create keyed blake3 hash of [enc audio chunk + iv]
             chunk = enc_audio[(i*CHUNK_SZ)-CHUNK_SZ:i*CHUNK_SZ]
-            data = chunk + iv + chunkKey
-            dataLen = len(chunk) + len(iv) + len(chunkKey)
-            glowworm_chunk_hash = glowwormHash(data, dataLen).to_bytes(8, byteorder='little', signed=False)
-            chunkHashes[i-1] = glowworm_chunk_hash
+            b = blake3(key=chunkKey)
+            b.update(chunk)
+            b.update(iv)
+            chunkHashes[i-1] = b.digest()
         
-        # create glowworm hash of [iv + nchunks + e_audio_len + MD + metadata key]
-        data = iv + nChunksBytes + eAudioLenBytes + self.metadata + mdKey
-        dataLen = len(iv) + len(nChunksBytes) + len(eAudioLenBytes) + len(self.metadata) + len(mdKey)
-        glowworm_md_hash = glowwormHash(data, dataLen).to_bytes(8, byteorder='little', signed=False)
-        print('success')
+        # create keyed blake3 hash of [iv + nchunks + e_audio_len + MD]
+        b = blake3(key=mdKey)
+        b.update(iv)
+        b.update(nChunksBytes)
+        b.update(eAudioLenBytes)
+        b.update(self.metadata)
+        print('success', flush=True)
 
-        print('Writing everything to .drm file...', end='')
+        print('Writing everything to .drm file...', end='', flush=True)
+        sys.stdout.flush()
         # write everything to file
-        protected_wav.writeframes(glowworm_md_hash)
+        protected_wav.writeframes(b.digest())
         protected_wav.writeframes(iv)
         protected_wav.writeframes(nChunksBytes)
         protected_wav.writeframes(eAudioLenBytes)
         protected_wav.writeframes(self.metadata)
         protected_wav.writeframes(enc_audio)
-        for gwhash in chunkHashes:
-            protected_wav.writeframes(gwhash)
+        for b3hash in chunkHashes:
+            protected_wav.writeframes(b3hash)
 
         protected_wav.close()
-        print('success')
+        print('success', flush=True)
 
     def read_song(self, path, metadata_frames=0):
         """Reads a wave file

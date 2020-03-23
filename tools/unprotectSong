@@ -13,54 +13,9 @@ from argparse import ArgumentParser
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import unpad
 from simon import SimonCipher
+from blake3 import blake3
 
 CHUNK_SZ = 16000
-
-'''
-n - length of the last string hashed
-s - ring buffer used for the internal state (32 words - 2048 bits)
-      an element s[i] is a 64-bit word, which is the ith element of the buffer,
-      wrapping around if necessary, when the index i becomes too large for the
-      buffer
-'''
-
-def glowwormAddBit(b, s, n, t):
-   if b == 1:
-      t = s[n % 32] ^ 0xffffffff
-   else:
-      t = s[n % 32] ^ 0
-   t = (t|(t>>1 & 0xffffffffffffffff)) ^ (t<<1 & 0xffffffffffffffff)
-   t ^= (t>>4 & 0xffffffffffffffff) ^ (t>>8 & 0xffffffffffffffff) ^ (t>>16 & 0xffffffffffffffff) ^ (t>>32 & 0xffffffffffffffff)
-   n = n + 1
-   s[n % 32] = s[n % 32] ^ t
-   h = s[n % 32] & 0xffffffffffffffff
-   return h, s, n, t
-
-def glowwormInit(s, n, t, h):
-   for i in range(4096):
-      h, s, n, t = glowwormAddBit((h & 1), s, n, t)
-   return s, n, t, h
-
-def glowwormHash(data, dataLen):
-   CHECKVALUE = 0xCCA4220FC78D45E0
-   s = [0] * 32
-   h = 1
-   n = 0
-   t = 0
-
-   s, n, t, h = glowwormInit(s, n, t, h)
-   assert(h == CHECKVALUE)
-   
-   for idx in range(dataLen):
-      currByte = data[idx]
-      for bIdx in range(7, -1, -1):
-         if ((currByte & (1<<bIdx))>>bIdx) == 0:
-            bit = 0
-         else:
-            bit = 1
-         h, s, n, t = glowwormAddBit(bit,s,n,t)
-
-   return h
 
 def simon_decrypt_chunk(cipher, chunk, len):
    p_chunk = bytes()
@@ -80,7 +35,7 @@ def unprotect(infile, outfile, simonkey_f, mdKeyFile, chunkKeyFile):
    simon_key = simon.read(32) #256/8
    simon.close()
 
-   #read glowworm hash keys into buffer
+   #read blake3 hash keys into buffer
    try:
       mdKeyFd = open(os.path.abspath(mdKeyFile), 'rb')
    except Exception as e:
@@ -116,14 +71,14 @@ def unprotect(infile, outfile, simonkey_f, mdKeyFile, chunkKeyFile):
    protected.close()
 
    # get segments of encrypted file
-   gwMdHash_len = 8
+   b3Hash_len = 32
 
    # get signature with first 256
-   gwMdHash = data[:gwMdHash_len]
+   b3Hash = data[:b3Hash_len]
 
    # get iv
-   end_iv = gwMdHash_len + 16
-   iv = data[gwMdHash_len:end_iv]
+   end_iv = b3Hash_len + 16
+   iv = data[b3Hash_len:end_iv]
    
    # get the number of 16000 chunks and audio length in bytes
    numChunks = data[end_iv:end_iv+4]
@@ -145,21 +100,23 @@ def unprotect(infile, outfile, simonkey_f, mdKeyFile, chunkKeyFile):
    # get all hashes of each block
    block_hashes = data[end_meta_data+intAudioLength:]
 
-   # recompute glowworm hash of [iv + nchunks + e_audio_len + MD + metadata key]
-   toHash = iv + numChunks + audio_length + meta_data + mdKey
-   toHashLen = len(iv) + len(numChunks) + len(audio_length) + len(meta_data) + len(mdKey)
-   glowworm_md_hash = glowwormHash(toHash, toHashLen).to_bytes(8, byteorder='little', signed=False)
-   
-   print('Verifying metadata hash...', end='')
-   if glowworm_md_hash != gwMdHash:
-      print('metadata hash does not match')
+   # recompute keyed blake3 hash of [iv + nchunks + e_audio_len + MD]
+   b = blake3(key=mdKey)
+   b.update(iv)
+   b.update(numChunks)
+   b.update(audio_length)
+   b.update(meta_data)
+
+   print('Verifying metadata hash...', end='', flush=True)
+   if b.digest() != b3Hash:
+      print('metadata hash does not match', flush=True)
       return 0
-   print('success')
+   print('success', flush=True)
 
    # decrypt audio using simon key
    md_size = meta_data[0] #first byte of song metadata is length
    if md_size > 100:
-      print('Something is wrong. Metadata max size is 100, got %s' % md_size)
+      print('Something is wrong. Metadata max size is 100, got %s' % md_size, flush=True)
       return 0
    simonkey_int = int.from_bytes(simon_key, byteorder='little', signed='False')
    iv_int = int.from_bytes(iv, byteorder='little', signed='False')
@@ -167,12 +124,12 @@ def unprotect(infile, outfile, simonkey_f, mdKeyFile, chunkKeyFile):
 
    #decrypting in chunks
    rem = len(enc_audio)
-   print('Total encrypted length: '+str(rem))
+   print('Total encrypted length: '+str(rem), flush=True)
    audio = bytes()
-   print('Number of 16KB chunks: '+str(intNumChunks))
+   print('Number of 16KB chunks: '+str(intNumChunks), flush=True)
    counter = 0
    start = 0
-   print('Verifying chunks and decrypting (this will take awhile)...', end='')
+   print('Verifying chunks and decrypting (this will take awhile)...', end='', flush=True)
    for i in range(0, intNumChunks):
 
       counter = counter + 1
@@ -185,13 +142,13 @@ def unprotect(infile, outfile, simonkey_f, mdKeyFile, chunkKeyFile):
       e_chunk = enc_audio[start:start+increment]
       start = start + increment
 
-      # recompute the glowworm chunk hash of [enc audio chunk + iv bytes + chunk key]
-      toHash = e_chunk + iv + chunkKey
-      toHashLen = len(e_chunk) + len(iv) + len(chunkKey)
-      glowworm_chunk_hash = glowwormHash(toHash, toHashLen).to_bytes(8, byteorder='little', signed=False)
+      # recompute the keyed blake3 chunk hash of [enc audio chunk + iv]
+      b = blake3(key=chunkKey)
+      b.update(e_chunk)
+      b.update(iv)
 
-      if glowworm_chunk_hash != block_hashes[i*8:8+i*8]:
-         print('chunk hash #'+str(i)+' does not match')
+      if b.digest() != block_hashes[i*32:32+i*32]:
+         print('chunk hash #'+str(i)+' does not match', flush=True)
          return 0
 
       # decrypt block
@@ -201,7 +158,7 @@ def unprotect(infile, outfile, simonkey_f, mdKeyFile, chunkKeyFile):
          p_chunk = unpad(p_chunk, AES.block_size)
       audio += p_chunk
 
-   print('success')
+   print('success', flush=True)
 
    # wave.open outfile
    try:
@@ -210,7 +167,7 @@ def unprotect(infile, outfile, simonkey_f, mdKeyFile, chunkKeyFile):
       print('Unable to open outfile: %s' % (e,))
       return 0
 
-   print("Writing everything to .wav file...")
+   print("Writing everything to .wav file...", end='', flush=True)
 
    # set outfile metadata to saved wav metadata
    unprotected.setnchannels(nchannels)
@@ -223,7 +180,7 @@ def unprotect(infile, outfile, simonkey_f, mdKeyFile, chunkKeyFile):
    # close outfile
    unprotected.close()
    
-   print('success')
+   print('success', flush=True)
 
 def main():
    parser = ArgumentParser(description='main interface to unprotect songs')
