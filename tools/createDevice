@@ -7,6 +7,7 @@ import os
 import json
 from argparse import ArgumentParser
 from base64 import b64decode, b64encode
+from blake3 import blake3
 
 
 def main(region_names, user_names, user_secrets, region_secrets, device_dir, region_secrets_path):
@@ -93,7 +94,9 @@ const u8 USER_IDS[] = {{ {", ".join([str(user_secrets[u]['id']) for u in user_na
 
 #define NUM_PROVISIONED_USERS {len(user_names)}
 const u8 PROVISIONED_UIDS[] = {{ {", ".join(uids)} }};
-const char *PROVISIONED_PINS[] = {{ {", ".join(['"' + user_secrets[u]['pin'] + '"' for u in user_names])} }};
+/* BASE64 DECODE HASHES BEFORE COMPARING */
+#define B64_PIN_HASH_SZ 44
+const char *PROVISIONED_B64PIN_HASHES[] = {{ {", ".join(['"' + str(b64encode(blake3((user_secrets[u]['pin']+u).encode()).digest())).strip("b'") + '"' for u in user_names])} }};
 
 /* BASE64 DECODE KEYS BEFORE USING */
 

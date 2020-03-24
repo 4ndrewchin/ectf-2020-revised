@@ -15,10 +15,10 @@
 #include "xintc.h"
 #include "constants.h"
 #include "sleep.h"
-#include "wolfssl/wolfcrypt/hash.h"
-#include "wolfssl/wolfcrypt/sha256.h"
+//#include "wolfssl/wolfcrypt/hash.h"
+//#include "wolfssl/wolfcrypt/sha256.h"
 #include "wolfssl/wolfcrypt/coding.h"
-#include "wolfssl/wolfcrypt/wc_encrypt.h"
+//#include "wolfssl/wolfcrypt/wc_encrypt.h"
 #include "blake3.h"
 
 
@@ -217,15 +217,17 @@ int init_cryptkeys() {
     if (Base64_Decode((void *)SIMON_KEY, (word32)b64SIMON_KEY_SZ, (void *)s.simonKey, &outLen) != 0) {
         return -1;
     }
+    if (outLen != SIMON_KEY_SZ) return -1;
     outLen = b64MD_KEY_SZ;
     if (Base64_Decode((void *)MD_KEY, (word32)b64MD_KEY_SZ, (void *)s.mdKey, &outLen) != 0) {
         return -1;
     }
+    if (outLen != MD_KEY_SZ) return -1;
     outLen = b64CHUNK_KEY_SZ;
     if (Base64_Decode((void *)CHUNK_KEY, (word32)b64CHUNK_KEY_SZ, (void *)s.chunkKey, &outLen) != 0) {
         return -1;
     }
-    return 0;
+    return (outLen != CHUNK_KEY_SZ);
 }
 
 
@@ -327,15 +329,19 @@ int init_cryptkeys() {
  * args     : number of different data to update hmac object with
  * data     : array of char pointers (data) to create hash with
  * dataLens : length of each data to be included in hash
- * key      : pointer to 32-bit key
+ * key      : (optional) pointer to 32-bit key to create keyed hash
  * out      : buffer to store resulting hash
  */
 int create_hash(int args, char* data[], int dataLens[], char* key, char* out) {
-    if (args <= 0 || data == NULL || dataLens == NULL || key == NULL || out == NULL) {
+    if (args <= 0 || data == NULL || dataLens == NULL || out == NULL) {
         return -1;
     }
     blake3_hasher h;
-    blake3_hasher_init_keyed(&h, key);
+    if (key == NULL) {
+        blake3_hasher_init(&h);
+    } else {
+        blake3_hasher_init_keyed(&h, key);
+    }
     for (int i = 0; i < args; i++) {
         blake3_hasher_update(&h, data[i], dataLens[i]);
     }
@@ -383,8 +389,22 @@ void login() {
         for (int i = 0; i < NUM_PROVISIONED_USERS; i++) {
             // search for matching username
             if (!strcmp(s.username, USERNAMES[PROVISIONED_UIDS[i]])) {
-                // check if pin matches
-                if (!strcmp(s.pin, PROVISIONED_PINS[i])) {
+                // basedecode pin hash
+                word32 outLen = B64_PIN_HASH_SZ;
+                char saltedHash[B64_PIN_HASH_SZ];
+                if (Base64_Decode((unsigned char *)PROVISIONED_B64PIN_HASHES[i], (word32)B64_PIN_HASH_SZ, (unsigned char *)saltedHash, &outLen) != 0) {
+                    break;
+                }
+                if (outLen != BLAKE3_OUT_LEN) break;
+                // hash pin+username
+                char out[32];
+                char* data[2] = { s.pin, s.username };
+                int dataLens[2] = { strlen(s.pin), strlen(s.username) };
+                if (create_hash(2, data, dataLens, NULL, out) != 0) {
+                    break;
+                }
+                // check if hashes match
+                if (!memcmp(saltedHash, out, BLAKE3_OUT_LEN)) {
                     //update state
                     s.logged_in = 1;
                     s.uid = PROVISIONED_UIDS[i];
@@ -679,11 +699,11 @@ void play_song() {
         }
 
         // decrypt chunk
-        ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, s.simonKey, (word32)SIMON_KEY_SZ, iv);
+        /*ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, s.simonKey, (word32)SIMON_KEY_SZ, iv);
         if (ret != 0) {
             mb_printf("Failed to play audio\r\n");
             return;
-        }
+        }*/
 
         // if last chunk unpad using PKCS#7
         if (chunknum == nchunks) {
@@ -814,12 +834,12 @@ void digital_out() {
         }
 
         // decrypt chunk
-        ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, s.simonKey, SIMON_KEY_SZ, iv);
+        /*ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, s.simonKey, SIMON_KEY_SZ, iv);
         if (ret != 0) {
             mb_printf("Failed to dump song\r\n");
             c->song.wav_size = 0;
             return;
-        }
+        }*/
 
         // get next IV before replacing encrypted chunk with decrypted chunk
         memcpy(iv, (get_drm_song(c->song) + lenAudio - rem + cp_num - SIMON_BLK_SZ), SIMON_BLK_SZ);
