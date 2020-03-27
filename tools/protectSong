@@ -15,6 +15,7 @@ import numpy as np
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import pad
 from Cryptodome.Random import get_random_bytes
+from speck import SpeckCipher
 from simon import SimonCipher
 from blake3 import blake3
 
@@ -58,15 +59,15 @@ class ProtectedSong(object):
         chunkKeyFile.close()
 
         # encrypt audio data using Simon (128 bit blocks, 256 bit key)
-        print('Encrypting audio (this will take a while)...', end='', flush=True)
+        print('Encrypting audio...', end='', flush=True)
         sys.stdout.flush()
         simonkey_int = int.from_bytes(simon_key, byteorder='little', signed='False')
         iv = get_random_bytes(16)
         iv_int = int.from_bytes(iv, byteorder='little', signed='False')
-        cipher = SimonCipher(simonkey_int, 256, 128, 'CBC', iv_int)
+        cipher = SpeckCipher(simonkey_int, 256, 128, 'CBC', iv_int)
         padded_audio = pad(bytes(self.full_song), AES.block_size)
-        enc_audio = bytes()
-        # simon can only encrypt block_size bytes at a time :(
+        enc_audio = bytearray()
+        # simon can only encrypt block_size bytes at a time
         for i in range(0,len(padded_audio),AES.block_size):
             enc_simon_chunk = cipher.encrypt(int.from_bytes(padded_audio[i:i+AES.block_size], byteorder='little', signed='False'))
             enc_simon_chunk = enc_simon_chunk.to_bytes(AES.block_size, byteorder='little')

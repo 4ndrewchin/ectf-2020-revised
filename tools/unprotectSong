@@ -12,13 +12,14 @@ import numpy as np
 from argparse import ArgumentParser
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import unpad
+from speck import SpeckCipher
 from simon import SimonCipher
 from blake3 import blake3
 
 CHUNK_SZ = 16000
 
 def simon_decrypt_chunk(cipher, chunk, len):
-   p_chunk = bytes()
+   p_chunk = bytearray()
    for i in range(0,len,AES.block_size):
       dec_simon_chunk = cipher.decrypt(int.from_bytes(chunk[i:i+AES.block_size], byteorder='little', signed='False'))
       dec_simon_chunk = dec_simon_chunk.to_bytes(AES.block_size, byteorder='little')
@@ -120,16 +121,16 @@ def unprotect(infile, outfile, simonkey_f, mdKeyFile, chunkKeyFile):
       return 0
    simonkey_int = int.from_bytes(simon_key, byteorder='little', signed='False')
    iv_int = int.from_bytes(iv, byteorder='little', signed='False')
-   cipher = SimonCipher(simonkey_int, 256, 128, 'CBC', iv_int)
+   cipher = SpeckCipher(simonkey_int, 256, 128, 'CBC', iv_int)
 
    #decrypting in chunks
    rem = len(enc_audio)
    print('Total encrypted length: '+str(rem), flush=True)
-   audio = bytes()
+   audio = bytearray()
    print('Number of 16KB chunks: '+str(intNumChunks), flush=True)
    counter = 0
    start = 0
-   print('Verifying chunks and decrypting (this will take awhile)...', end='', flush=True)
+   print('Verifying chunks and decrypting...', end='', flush=True)
    for i in range(0, intNumChunks):
 
       counter = counter + 1

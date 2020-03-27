@@ -60,6 +60,81 @@ void myISR(void) {
     InterruptProcessed = TRUE;
 }
 
+//////////////////////// SPECK ////////////////////////
+
+
+#define ROTL64(x,r) (((x)<<(r)) | (x>>(64-(r))))
+#define ROTR64(x,r) (((x)>>(r)) | ((x)<<(64-(r))))
+#define ER64(x,y,k) (x=ROTR64(x,8), x+=y, x^=k, y=ROTL64(y,3), y^=x)
+#define DR64(x,y,k) (y^=x, y=ROTR64(y,3), x^=k, x-=y, x=ROTL64(x,8))
+
+
+void Words64ToBytes(u64 words[],u8 bytes[],int numwords) {
+    int i,j=0;
+    for(i=0;i<numwords;i++) {
+        bytes[j]=(u8)words[i];
+        bytes[j+1]=(u8)(words[i]>>8);
+        bytes[j+2]=(u8)(words[i]>>16);
+        bytes[j+3]=(u8)(words[i]>>24);
+        bytes[j+4]=(u8)(words[i]>>32);
+        bytes[j+5]=(u8)(words[i]>>40);
+        bytes[j+6]=(u8)(words[i]>>48);
+        bytes[j+7]=(u8)(words[i]>>56);
+        j+=8;
+    }
+}
+
+
+void Speck128256KeySchedule(u64 K[]) {
+    u64 i, D=K[3], C=K[2], B=K[1], A=K[0];
+    for (i=0; i<33;) {
+        s.rk[i]=A; ER64(B,A,i++);
+        s.rk[i]=A; ER64(C,A,i++);
+        s.rk[i]=A; ER64(D,A,i++);
+    }
+    s.rk[i]=A;
+}
+
+
+void Speck128256Decrypt(u64 Pt[], u64 Ct[], u64* iv) {
+    int i;
+    Pt[0]=Ct[0]; Pt[1]=Ct[1];
+    for(i=33;i>=0;) DR64(Pt[1],Pt[0],s.rk[i--]);
+
+    Pt[0] ^= iv[0];
+    iv[0] = Ct[0];
+
+    Pt[1] ^= iv[1];
+    iv[1] = Ct[1];
+}
+
+/* Decrypt an audio chunk in-place using Speck128/256
+ * 
+ * chunk :      pointer to the current encrypted audio chunk
+ * totalBytes : length of chunk to decrypt in bytes
+ * iv :         pointer to the initialization vector
+ */
+/*void speckDecryptChunk(char* out, u8* chunk, int totalBytes, char* iv) {
+    for (int i = 0; i < totalBytes; i+=SIMON_BLK_SZ) {
+        u8* ct = chunk + i;
+
+        u8* Pt[SIMON_BLK_SZ];
+        Speck128256Decrypt((u64*)Pt, (u64*)ct, (u64*)iv);
+
+        memcpy(out+i, Pt, SIMON_BLK_SZ);
+    }
+}*/
+void speckDecryptChunk(u8* chunk, int totalBytes, u64* iv) {
+    for (int i = 0; i < totalBytes; i+=SIMON_BLK_SZ) {
+        u8* ct = chunk + i;
+
+        u64 Pt[SIMON_BLK_SZ/8];
+        Speck128256Decrypt(Pt, (u64*)ct, iv);
+
+        memcpy((u8*)ct, (u8*)Pt, SIMON_BLK_SZ);
+    }
+}
+
 
 //////////////////////// UTILITY FUNCTIONS ////////////////////////
 
@@ -210,6 +285,7 @@ int is_locked() {
 
 /* takes the base64 encoded cryptographic keys from secrets.h, decodes them, and
  * stores them into the DRM local internal_state struct
+ * also compute Speck key schedule
  * return 0 on success, -1 otherwise
  */
 int init_cryptkeys() {
@@ -227,100 +303,11 @@ int init_cryptkeys() {
     if (Base64_Decode((void *)CHUNK_KEY, (word32)b64CHUNK_KEY_SZ, (void *)s.chunkKey, &outLen) != 0) {
         return -1;
     }
+    //u64 words[SIMON_KEY_SZ/8];
+    //BytesToWords64((u8*)s.simonKey,  words, SIMON_KEY_SZ);
+    Speck128256KeySchedule((u64*)s.simonKey);
     return (outLen != CHUNK_KEY_SZ);
 }
-
-
-/*#define glowwormAddBit(b,s,n,t) ( \
-    t = s[n % 32] ^ ((b) ? 0xffffffff : 0), \
-    t = (t|(t>>1)) ^ (t<<1), \
-    t ^= (t>>4) ^ (t>>8) ^ (t>>16) ^ (t>>32),\
-    n++, \
-    s[n % 32] ^= t \
-)
-
-
-#define glowwormInit(s,n,t,h) { \
-    h = 1; \
-    n = 0; \
-    for (int i=0; i<32; i++) \
-        s[i]=0; \
-    for (int i=0; i<4096; i++) \
-        h=glowwormAddBit((h & 1L),s,n,t); \
-    n = 0; \
-}*/
-
-
-// Call glowwormInit once, which returns the hash of the
-// empty string, which should equal CHECKVALUE. Repeatedly
-// call AddBit to add a new bit to the end, and return the
-// hash of the resulting string. DelBit deletes the last
-// bit, and must be passed the last bit of the most recent
-// string hashed. The macros should be passed these:
-// uint64 s[32]; //buffer
-// static uint64 n; //current string length
-// uint64 t, i, h; //temporary
-// const uint64 CHECKVALUE = 0xCCA4220FC78D45E0;
-
-/*
- * create a glowworm hash
- * data    : pointer to data to hash
- * dataLen : length of data to hash in bytes
- * return hash (uint64) on success
- */ 
-/*uint64 glowwormHash(char* data, uint64 dataLen) {
-    //const uint64 CHECKVALUE = 0xCCA4220FC78D45E0;
-    uint64 s[32]; //buffer
-    uint64 n; //current string length
-    uint64 t, h; //temporary
-
-    //glowwormInit(s,n,t,h); //shave off 3 seconds with precomputation
-    n = 0;
-    t = (uint64)5699370651900549022;
-    h = (uint64)14745948531085624800;
-    s[0] = (uint64)14745948531085624800;
-    s[1] = (uint64)16120642418826990911;
-    s[2] = (uint64)9275000239821960485;
-    s[3] = (uint64)4476743750426018428;
-    s[4] = (uint64)741912412851399944;
-    s[5] = (uint64)17767459926458528083;
-    s[6] = (uint64)2469478127305654386;
-    s[7] = (uint64)6225995753166195692;
-    s[8] = (uint64)4750461123551357503;
-    s[9] = (uint64)10555348896626929070;
-    s[10] = (uint64)14572814704552083992;
-    s[11] = (uint64)2824678681307928227;
-    s[12] = (uint64)8198425675642015085;
-    s[13] = (uint64)3315257422098907176;
-    s[14] = (uint64)13762405054855287671;
-    s[15] = (uint64)15186990245784674763;
-    s[16] = (uint64)5015234624788364844;
-    s[17] = (uint64)8462123041350221017;
-    s[18] = (uint64)9974233762935842858;
-    s[19] = (uint64)11502466225357323772;
-    s[20] = (uint64)17531649588530077495;
-    s[21] = (uint64)8670185664686319238;
-    s[22] = (uint64)4707560773883213848;
-    s[23] = (uint64)10843017560065197706;
-    s[24] = (uint64)17676146699030180721;
-    s[25] = (uint64)17194224147714809490;
-    s[26] = (uint64)4745306135015590921;
-    s[27] = (uint64)11298931964348737593;
-    s[28] = (uint64)14067901419238702746;
-    s[29] = (uint64)15452291037738416485;
-    s[30] = (uint64)591116246257296967;
-    s[31] = (uint64)15728077675183395515;
-    //assert(h == CHECKVALUE);
-    
-    for (int idx = 0; idx < dataLen; idx++) {
-        char currByte = data[idx];
-        for (int bIdx = 7; bIdx >= 0; bIdx--) {
-            char bit = (currByte>>bIdx&1);
-            h = glowwormAddBit(bit,s,n,t);
-        }
-    }
-    return h;
-}*/
 
 
 /* create a new Blake3 hash
@@ -733,7 +720,7 @@ void play_song() {
         cp_xfil_cnt = cp_num;
 
         while (cp_xfil_cnt > 0) {
-            mb_printf("rem %u, cp_num %u, cp_xfil_cnt %u offset %u, fifofill %u\r\n", rem, cp_num, cp_xfil_cnt, offset, *fifo_fill);
+            //mb_printf("rem %u, cp_num %u, cp_xfil_cnt %u offset %u, fifofill %u\r\n", rem, cp_num, cp_xfil_cnt, offset, *fifo_fill);
             // polling while loop to wait for DMA to be ready
             // DMA must run first for this to yield the proper state
             // rem != lenAudio checks for first run
@@ -749,7 +736,7 @@ void play_song() {
                 dma_cnt = cp_xfil_cnt;
                 paused = FALSE;
             }
-            mb_printf("%u\r\n", dma_cnt);
+            //mb_printf("%u\r\n", dma_cnt);
             fnAudioPlay(sAxiDma, offset, dma_cnt);
             cp_xfil_cnt -= dma_cnt;
         }
@@ -787,8 +774,6 @@ void digital_out() {
     // each audio chunk, but initially, it is the original initialization vector
     char iv[SIMON_BLK_SZ];
     memcpy(iv, c->song.iv, SIMON_BLK_SZ);
-    // buffer used to hold current decrypted audio chunk
-    char plainChunk[CHUNK_SZ];
     // chunk number currently being decrypted
     int chunknum = 0;
 
@@ -806,7 +791,6 @@ void digital_out() {
 
     mb_printf("Dumping song (%dB)...\r\n", wav_size);
     // taken & modified from play_song
-    int ret;
     unsigned int lenAudio = wav_size;
 
     int rem = lenAudio;
@@ -825,15 +809,22 @@ void digital_out() {
         int dataLens[2] = { cp_num, SIMON_BLK_SZ };
         char out[BLAKE3_OUT_LEN];
         if (create_hash(2, data, dataLens, s.chunkKey, out) != 0) {
-            mb_printf("Failed to play audio\r\n");
+            mb_printf("Failed to dump song\r\n");
+            c->song.wav_size = 0;
             return;
         }
         if (memcmp(chunkHash, out, BLAKE3_OUT_LEN) != 0) {
-            mb_printf("Failed to play audio\r\n");
+            mb_printf("Failed to dump song BLAKE3\r\n");
+            c->song.wav_size = 0;
             return;
         }
 
-        // decrypt chunk
+        // decrypt 16 KB chunk in-place
+        //char plainChunk[CHUNK_SZ];
+        mb_printf("%x\r\n", iv[0]);
+        speckDecryptChunk((get_drm_song(c->song) + lenAudio - rem), cp_num, iv);
+
+
         /*ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, s.simonKey, SIMON_KEY_SZ, iv);
         if (ret != 0) {
             mb_printf("Failed to dump song\r\n");
@@ -842,24 +833,24 @@ void digital_out() {
         }*/
 
         // get next IV before replacing encrypted chunk with decrypted chunk
-        memcpy(iv, (get_drm_song(c->song) + lenAudio - rem + cp_num - SIMON_BLK_SZ), SIMON_BLK_SZ);
-        memcpy((get_drm_song(c->song) + lenAudio - rem), plainChunk, CHUNK_SZ);
+        //memcpy(iv, (get_drm_song(c->song) + lenAudio - rem + cp_num - SIMON_BLK_SZ), SIMON_BLK_SZ);
+        //memcpy((get_drm_song(c->song) + lenAudio - rem), plainChunk, cp_num);
 
         // if last chunk unpad using PKCS#7
         if (chunknum == nchunks) {
             int pads = (int*)(get_drm_song(c->song) + lenAudio - rem)[cp_num-1];
             // terminate if invalid padding
             if (pads <= 0 || pads > 16) {
-                mb_printf("Failed to dump song\r\n");
-                c->song.wav_size = 0;
-                return;
+                mb_printf("Failed to dump song padding\r\n");
+                //c->song.wav_size = 0;
+                //return;
             }
             for (int i = 1; i <= pads; i++) {
                 int bite = (int*)(get_drm_song(c->song) + lenAudio - rem)[cp_num-i];
                 if (bite != pads) {
-                    mb_printf("Failed to dump song\r\n");
-                    c->song.wav_size = 0;
-                    return;
+                    mb_printf("Failed to dump song padding\r\n");
+                    //c->song.wav_size = 0;
+                    //return;
                 }
             }
             wav_size -= pads;

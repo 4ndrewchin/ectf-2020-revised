@@ -180,9 +180,10 @@ typedef struct {
     char username[USERNAME_SZ];     // logged on username
     char pin[MAX_PIN_SZ];           // logged on pin
     song_md song_md;                // current song metadata
-    char simonKey[44];                // base64 decoded Simon key
+    char simonKey[44];              // base64 decoded Simon key
     char mdKey[44];                 // base64 decoded metadata key
     char chunkKey[44];              // base64 decoded encrypted audio chunk key
+    u64 rk[34];                     // round keys for Speck
 } internal_state;
 
 
