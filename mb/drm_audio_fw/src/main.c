@@ -607,7 +607,7 @@ void play_song() {
                 return;
             case RESTART:
                 mb_printf("Restarting song... \r\n");
-                usleep(100000); // prevent choppy audio on restart
+                usleep(10000); // prevent choppy audio on restart
                 chunknum = 0; // reset chunk number
                 rem = lenAudio; // reset song counter
                 firstChunk = TRUE;
