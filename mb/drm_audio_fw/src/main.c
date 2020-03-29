@@ -495,7 +495,7 @@ void share_song() {
     // only allow MAX_USERS shares -- much simpler alternative to hash map
     // a song owner may share a song with one user 64 times and
     // prevent it from being shared with anybody else; however,
-    // we can no longer overflow s.song_md.num_users in line 463
+    // we can no longer overflow s.song_md.num_users in line 507
     if (s.song_md.num_users >= MAX_USERS) {
         mb_printf("Cannot share song\r\n");
         c->song.wav_size = 0;
@@ -512,14 +512,14 @@ void share_song() {
 
     // update metadata hash and copy it into the file in the shared memory
     char* data[1] = { c->song.iv };
-    int dataLens[1] = { BLAKE3_OUT_LEN + SPECK_BLK_SZ + sizeof(int)*2 + MD_SZ + nchunks*BLAKE3_OUT_LEN };
+    int dataLens[1] = { SPECK_BLK_SZ + sizeof(int)*2 + MD_SZ };
     char out[BLAKE3_OUT_LEN];
     if (create_hash(1, data, dataLens, s.mdKey, out) != 0) {
         mb_printf("Cannot share song\r\n");
         c->song.wav_size = 0;
         return;
     }
-    memcpy(c->song.mdHash, out, MD_SZ);
+    memcpy(c->song.mdHash, out, BLAKE3_OUT_LEN);
 
     // with a max of 32 different regions and 64 different users, the max size
     // of the song metadata is 100 outBytes. We preallocate 100 outBytes for song metadata
@@ -530,7 +530,7 @@ void share_song() {
 } // end share_song()
 
 
-// plays a song and enter the playback loop, which has it's own commands
+// plays a song and enter the playback loop, which has its own commands
 // if the metadata verification fails, set c->song.wav_size = 0 to notify DRM
 // if error occurs during playback, simply break out of the playback loop
 void play_song() {

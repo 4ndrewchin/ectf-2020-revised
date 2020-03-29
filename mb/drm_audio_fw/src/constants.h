@@ -97,8 +97,8 @@ start
 | DRM Song metadata          |
 | (100 bytes)                | ---> struct drm_md
 |____________________________|
-| encrypted [audio+padding]  |
-| (max of 32 Megabytes       |
+| encrypted [audio+padding]  | ---> use 32-bit key
+| (max of 32 Megabytes       |      Speck 128/256
 |  = 2098 16000B chunks      |
 |____________________________| ___
 | Encrypted Audio Chunk #0   |    |
