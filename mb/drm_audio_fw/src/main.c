@@ -519,7 +519,7 @@ void share_song() {
         c->song.wav_size = 0;
         return;
     }
-    memcpy(c->song.mdHash, out, BLAKE3_OUT_LEN);
+    memcpy(c->song.mdHash, out, MD_SZ);
 
     // with a max of 32 different regions and 64 different users, the max size
     // of the song metadata is 100 outBytes. We preallocate 100 outBytes for song metadata
