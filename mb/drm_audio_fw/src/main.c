@@ -15,10 +15,7 @@
 #include "xintc.h"
 #include "constants.h"
 #include "sleep.h"
-//#include "wolfssl/wolfcrypt/hash.h"
-//#include "wolfssl/wolfcrypt/sha256.h"
 #include "wolfssl/wolfcrypt/coding.h"
-//#include "wolfssl/wolfcrypt/wc_encrypt.h"
 #include "blake3.h"
 
 
@@ -69,70 +66,54 @@ void myISR(void) {
 #define DR64(x,y,k) (y^=x, y=ROTR64(y,3), x^=k, x-=y, x=ROTL64(x,8))
 
 
-void Words64ToBytes(u64 words[],u8 bytes[],int numwords) {
-    int i,j=0;
-    for(i=0;i<numwords;i++) {
-        bytes[j]=(u8)words[i];
-        bytes[j+1]=(u8)(words[i]>>8);
-        bytes[j+2]=(u8)(words[i]>>16);
-        bytes[j+3]=(u8)(words[i]>>24);
-        bytes[j+4]=(u8)(words[i]>>32);
-        bytes[j+5]=(u8)(words[i]>>40);
-        bytes[j+6]=(u8)(words[i]>>48);
-        bytes[j+7]=(u8)(words[i]>>56);
-        j+=8;
-    }
-}
-
-
-void Speck128256KeySchedule(u64 K[]) {
-    u64 i, D=K[3], C=K[2], B=K[1], A=K[0];
-    for (i=0; i<33;) {
-        s.rk[i]=A; ER64(B,A,i++);
-        s.rk[i]=A; ER64(C,A,i++);
-        s.rk[i]=A; ER64(D,A,i++);
+/* Compute Speck 128/256 key schedule given a pointer to a char buffer
+ * containing the key -- only called once per boot
+ */ 
+/*void Speck128256KeySchedule(u64* K) {
+    int i;
+    u64 D=K[3], C=K[2], B=K[1], A=K[0];
+    for (i=0; i<33; i += 3) {
+        s.rk[i]=A; ER64(B,A,i);
+        s.rk[i]=A; ER64(C,A,i+1);
+        s.rk[i]=A; ER64(D,A,i+2);
     }
     s.rk[i]=A;
-}
+}*/
 
+/* Speck 128/256 decryption using CBC mode
+ *
+ * inCt     : pointer to the ciphertext to decrypt
+ * outPt    : pointer to the buffer to store the plaintext
+ * iv       : pointer to the initialization vector     
+ */
+void Speck128256Decrypt(u64* inCt, u64 outPt[],u64* iv) {
+    outPt[0]=inCt[0]; outPt[1]=inCt[1];
+    for(int i=33;i>=0; i--) DR64(outPt[1],outPt[0],s.rk[i]);
 
-void Speck128256Decrypt(u64 Pt[], u64 Ct[], u64* iv) {
-    int i;
-    Pt[0]=Ct[0]; Pt[1]=Ct[1];
-    for(i=33;i>=0;) DR64(Pt[1],Pt[0],s.rk[i--]);
+    outPt[0] ^= iv[0];
+    outPt[1] ^= iv[1];
 
-    Pt[0] ^= iv[0];
-    iv[0] = Ct[0];
-
-    Pt[1] ^= iv[1];
-    iv[1] = Ct[1];
+    iv[0] = inCt[0];
+    iv[1] = inCt[1];
 }
 
 /* Decrypt an audio chunk in-place using Speck128/256
+ * returns 0 on success, -1 otherwise
  * 
- * chunk :      pointer to the current encrypted audio chunk
- * totalBytes : length of chunk to decrypt in bytes
- * iv :         pointer to the initialization vector
+ * chunk        : pointer to the current encrypted audio chunk
+ * totalBytes   : length of chunk to decrypt in bytes
+ * iv           : pointer to the initialization vector
  */
-/*void speckDecryptChunk(char* out, u8* chunk, int totalBytes, char* iv) {
-    for (int i = 0; i < totalBytes; i+=SIMON_BLK_SZ) {
-        u8* ct = chunk + i;
-
-        u8* Pt[SIMON_BLK_SZ];
-        Speck128256Decrypt((u64*)Pt, (u64*)ct, (u64*)iv);
-
-        memcpy(out+i, Pt, SIMON_BLK_SZ);
+int speckDecryptChunk(char* chunk, int totalBytes, char* iv) {
+    if (chunk == NULL || totalBytes <= 0 || (totalBytes % SPECK_BLK_SZ != 0) || iv == NULL) {
+        return -1;
     }
-}*/
-void speckDecryptChunk(u8* chunk, int totalBytes, u64* iv) {
-    for (int i = 0; i < totalBytes; i+=SIMON_BLK_SZ) {
-        u8* ct = chunk + i;
-
-        u64 Pt[SIMON_BLK_SZ/8];
-        Speck128256Decrypt(Pt, (u64*)ct, iv);
-
-        memcpy((u8*)ct, (u8*)Pt, SIMON_BLK_SZ);
+    u64 Pt[SPECK_BLK_SZ/8];
+    for (int i = 0; i < totalBytes; i+=SPECK_BLK_SZ) {
+        Speck128256Decrypt(chunk+i, Pt, (u64*)iv);
+        memcpy(chunk+i, (char*)Pt, SPECK_BLK_SZ);      
     }
+    return 0;
 }
 
 
@@ -289,11 +270,11 @@ int is_locked() {
  * return 0 on success, -1 otherwise
  */
 int init_cryptkeys() {
-    word32 outLen = b64SIMON_KEY_SZ;
-    if (Base64_Decode((void *)SIMON_KEY, (word32)b64SIMON_KEY_SZ, (void *)s.simonKey, &outLen) != 0) {
+    word32 outLen = b64SPECK_KEY_SZ;
+    if (Base64_Decode((void *)SPECK_KEY, (word32)b64SPECK_KEY_SZ, (void *)s.speckKey, &outLen) != 0) {
         return -1;
     }
-    if (outLen != SIMON_KEY_SZ) return -1;
+    if (outLen != SPECK_KEY_SZ) return -1;
     outLen = b64MD_KEY_SZ;
     if (Base64_Decode((void *)MD_KEY, (word32)b64MD_KEY_SZ, (void *)s.mdKey, &outLen) != 0) {
         return -1;
@@ -303,9 +284,16 @@ int init_cryptkeys() {
     if (Base64_Decode((void *)CHUNK_KEY, (word32)b64CHUNK_KEY_SZ, (void *)s.chunkKey, &outLen) != 0) {
         return -1;
     }
-    //u64 words[SIMON_KEY_SZ/8];
-    //BytesToWords64((u8*)s.simonKey,  words, SIMON_KEY_SZ);
-    Speck128256KeySchedule((u64*)s.simonKey);
+    // compute Speck 128/256 key schedule
+    u64* K = (u64*)s.speckKey;
+    int i = 0;
+    u64 D=K[3], C=K[2], B=K[1], A=K[0];
+    for (i=0; i<33;) {
+        s.rk[i]=A; ER64(B,A,i++);
+        s.rk[i]=A; ER64(C,A,i++);
+        s.rk[i]=A; ER64(D,A,i++);
+    }
+    s.rk[i]=A;
     return (outLen != CHUNK_KEY_SZ);
 }
 
@@ -347,7 +335,7 @@ int verify_song() {
     mb_printf("Verifying Audio File...\r\n");
     char out[BLAKE3_OUT_LEN];
     char* data[1] = { c->song.iv };
-    int dataLens[1] = { SIMON_BLK_SZ + sizeof(int)*2 + MD_SZ };
+    int dataLens[1] = { SPECK_BLK_SZ + sizeof(int)*2 + MD_SZ };
     if (create_hash(1, data, dataLens, s.mdKey, out) != 0) {
         mb_printf("Verification Failed\r\n");
         return -1;
@@ -524,7 +512,7 @@ void share_song() {
 
     // update metadata hash and copy it into the file in the shared memory
     char* data[1] = { c->song.iv };
-    int dataLens[1] = { BLAKE3_OUT_LEN + SIMON_BLK_SZ + sizeof(int)*2 + MD_SZ + nchunks*BLAKE3_OUT_LEN };
+    int dataLens[1] = { BLAKE3_OUT_LEN + SPECK_BLK_SZ + sizeof(int)*2 + MD_SZ + nchunks*BLAKE3_OUT_LEN };
     char out[BLAKE3_OUT_LEN];
     if (create_hash(1, data, dataLens, s.mdKey, out) != 0) {
         mb_printf("Cannot share song\r\n");
@@ -534,7 +522,7 @@ void share_song() {
     memcpy(c->song.mdHash, out, BLAKE3_OUT_LEN);
 
     // with a max of 32 different regions and 64 different users, the max size
-    // of the song metadata is 100 bytes. We preallocate 100 bytes for song metadata
+    // of the song metadata is 100 outBytes. We preallocate 100 outBytes for song metadata
     // at drm file creation to remove the need for the expensive memmove() that
     // used to be here
 
@@ -549,7 +537,7 @@ void play_song() {
     u32 counter = 0, cp_num, cp_xfil_cnt, offset, dma_cnt, lenAudio, *fifo_fill;
     // for function return values
     int ret;
-    // rem is the bytes of audio remaining to play during the play loop
+    // rem is the outBytes of audio remaining to play during the play loop
     // we need rem to be signed so we can check if under 0
     int rem;
 
@@ -578,12 +566,12 @@ void play_song() {
     // whether we are operating on the first chunk of the audio
     int firstChunk = TRUE;
     // save a copy of the initialization vector used for the AES-CBC encryption
-    char origIv[SIMON_BLK_SZ];
-    memcpy(origIv, c->song.iv, SIMON_BLK_SZ);
+    char origIv[SPECK_BLK_SZ];
+    memcpy(origIv, c->song.iv, SPECK_BLK_SZ);
     // buffer used to store current "IV" value -- we change this value after decrypting
     // each audio chunk, but initially, it is the original initialization vector
-    char iv[SIMON_BLK_SZ];
-    memcpy(iv, c->song.iv, SIMON_BLK_SZ);
+    char iv[SPECK_BLK_SZ];
+    memcpy(iv, c->song.iv, SPECK_BLK_SZ);
     // buffer used to hold current decrypted audio chunk
     char plainChunk[CHUNK_SZ];
     // chunk number currently being decrypted
@@ -608,13 +596,14 @@ void play_song() {
                 set_paused();
                 paused = TRUE;
                 while (!InterruptProcessed) continue; // wait for interrupt
+                usleep(10000);
                 break;
             case PLAY:
                 mb_printf("Resuming... \r\n");
                 set_playing();
                 break;
             case STOP:
-                mb_printf("Stopping playback...\r\n");
+                mb_printf("Stopping playback... Press enter to continue.\r\n");
                 return;
             case RESTART:
                 mb_printf("Restarting song... \r\n");
@@ -630,11 +619,10 @@ void play_song() {
                 rem -= SKIP_SZ; // skip ahead
                 // if we try to skip past the end of the song/preview, end playback
                 if (rem <= 0) {
+                    mb_printf("Done Playing Song. Press enter to continue.\r\n");
                     return;
                 }
                 chunknum += (SKIP_SZ / CHUNK_SZ);
-                // TODO: can we overshoot chunknum? i.e. find ourselves in
-                // a scenario where last chunk is not unpadded?
                 break;
             case RW:
                 mb_printf("Rewinding 5 seconds... \r\n");
@@ -642,7 +630,7 @@ void play_song() {
                 rem += SKIP_SZ; // rewind
                 // if we try to rewind past the beginning, play from the beginning
                 if (rem > lenAudio) {
-                    usleep(100000); // prevent choppy audio on restart
+                    usleep(10000); // prevent choppy audio on restart
                     rem = lenAudio;
                     firstChunk = TRUE;
                 }
@@ -666,7 +654,7 @@ void play_song() {
         if (firstChunk) {
             firstChunk = FALSE;
         } else {
-            memcpy(iv, (get_drm_song(c->song) + lenAudio - rem - SIMON_BLK_SZ), SIMON_BLK_SZ);
+            memcpy(iv, (get_drm_song(c->song) + lenAudio - rem - SPECK_BLK_SZ), SPECK_BLK_SZ);
         }
 
         // verify chunk using blake3 chunk hash
@@ -674,7 +662,7 @@ void play_song() {
         memcpy(chunkHash, get_drm_hash(c->song, chunknum++), BLAKE3_OUT_LEN);
 
         char* data[2] = { get_drm_song(c->song) + lenAudio - rem, origIv };
-        int dataLens[2] = { cp_num, SIMON_BLK_SZ };
+        int dataLens[2] = { cp_num, SPECK_BLK_SZ };
         char out[BLAKE3_OUT_LEN];
         if (create_hash(2, data, dataLens, s.chunkKey, out) != 0) {
             mb_printf("Failed to play audio\r\n");
@@ -685,12 +673,12 @@ void play_song() {
             return;
         }
 
-        // decrypt chunk
-        /*ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, s.simonKey, (word32)SIMON_KEY_SZ, iv);
-        if (ret != 0) {
+        // decrypt 16 KB chunk in buffer
+        memcpy(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num);
+        if (speckDecryptChunk(plainChunk, cp_num, iv) != 0) {
             mb_printf("Failed to play audio\r\n");
             return;
-        }*/
+        }
 
         // if last chunk unpad using PKCS#7
         if (chunknum == nchunks) {
@@ -720,7 +708,6 @@ void play_song() {
         cp_xfil_cnt = cp_num;
 
         while (cp_xfil_cnt > 0) {
-            //mb_printf("rem %u, cp_num %u, cp_xfil_cnt %u offset %u, fifofill %u\r\n", rem, cp_num, cp_xfil_cnt, offset, *fifo_fill);
             // polling while loop to wait for DMA to be ready
             // DMA must run first for this to yield the proper state
             // rem != lenAudio checks for first run
@@ -736,7 +723,6 @@ void play_song() {
                 dma_cnt = cp_xfil_cnt;
                 paused = FALSE;
             }
-            //mb_printf("%u\r\n", dma_cnt);
             fnAudioPlay(sAxiDma, offset, dma_cnt);
             cp_xfil_cnt -= dma_cnt;
         }
@@ -768,17 +754,17 @@ void digital_out() {
     // number of encrypted chunks
     int nchunks = c->song.numChunks;
     // save a copy of the initialization vector used for the AES-CBC encryption
-    char origIv[SIMON_BLK_SZ];
-    memcpy(origIv, c->song.iv, SIMON_BLK_SZ);
+    char origIv[SPECK_BLK_SZ];
+    memcpy(origIv, c->song.iv, SPECK_BLK_SZ);
     // buffer used to store current "IV" value -- we change this value after decrypting
     // each audio chunk, but initially, it is the original initialization vector
-    char iv[SIMON_BLK_SZ];
-    memcpy(iv, c->song.iv, SIMON_BLK_SZ);
+    char iv[SPECK_BLK_SZ];
+    memcpy(iv, c->song.iv, SPECK_BLK_SZ);
     // chunk number currently being decrypted
     int chunknum = 0;
 
     // remove all metadata size from file sizes to reflect audio only
-    unsigned int all_md_len = BLAKE3_OUT_LEN + SIMON_BLK_SZ + sizeof(int)*2 + MD_SZ + nchunks*BLAKE3_OUT_LEN;
+    unsigned int all_md_len = BLAKE3_OUT_LEN + SPECK_BLK_SZ + sizeof(int)*2 + MD_SZ + nchunks*BLAKE3_OUT_LEN;
     file_size -= all_md_len;
     wav_size -= all_md_len;
 
@@ -806,7 +792,7 @@ void digital_out() {
         memcpy(chunkHash, get_drm_hash(c->song, chunknum++), BLAKE3_OUT_LEN);
 
         char* data[2] = { get_drm_song(c->song) + lenAudio - rem, origIv };
-        int dataLens[2] = { cp_num, SIMON_BLK_SZ };
+        int dataLens[2] = { cp_num, SPECK_BLK_SZ };
         char out[BLAKE3_OUT_LEN];
         if (create_hash(2, data, dataLens, s.chunkKey, out) != 0) {
             mb_printf("Failed to dump song\r\n");
@@ -814,43 +800,33 @@ void digital_out() {
             return;
         }
         if (memcmp(chunkHash, out, BLAKE3_OUT_LEN) != 0) {
-            mb_printf("Failed to dump song BLAKE3\r\n");
+            mb_printf("Failed to dump song\r\n");
             c->song.wav_size = 0;
             return;
         }
 
         // decrypt 16 KB chunk in-place
-        //char plainChunk[CHUNK_SZ];
-        mb_printf("%x\r\n", iv[0]);
-        speckDecryptChunk((get_drm_song(c->song) + lenAudio - rem), cp_num, iv);
-
-
-        /*ret = wc_AesCbcDecryptWithKey(plainChunk, (get_drm_song(c->song) + lenAudio - rem), cp_num, s.simonKey, SIMON_KEY_SZ, iv);
-        if (ret != 0) {
+        if (speckDecryptChunk((get_drm_song(c->song) + lenAudio - rem), cp_num, iv) != 0) {
             mb_printf("Failed to dump song\r\n");
             c->song.wav_size = 0;
             return;
-        }*/
-
-        // get next IV before replacing encrypted chunk with decrypted chunk
-        //memcpy(iv, (get_drm_song(c->song) + lenAudio - rem + cp_num - SIMON_BLK_SZ), SIMON_BLK_SZ);
-        //memcpy((get_drm_song(c->song) + lenAudio - rem), plainChunk, cp_num);
+        }
 
         // if last chunk unpad using PKCS#7
         if (chunknum == nchunks) {
             int pads = (int*)(get_drm_song(c->song) + lenAudio - rem)[cp_num-1];
             // terminate if invalid padding
             if (pads <= 0 || pads > 16) {
-                mb_printf("Failed to dump song padding\r\n");
-                //c->song.wav_size = 0;
-                //return;
+                mb_printf("Failed to dump song\r\n");
+                c->song.wav_size = 0;
+                return;
             }
             for (int i = 1; i <= pads; i++) {
                 int bite = (int*)(get_drm_song(c->song) + lenAudio - rem)[cp_num-i];
                 if (bite != pads) {
-                    mb_printf("Failed to dump song padding\r\n");
-                    //c->song.wav_size = 0;
-                    //return;
+                    mb_printf("Failed to dump song\r\n");
+                    c->song.wav_size = 0;
+                    return;
                 }
             }
             wav_size -= pads;
@@ -870,6 +846,9 @@ void digital_out() {
 
 // clear internal state on exit (but not cryptokeys -- created once per board boot)
 void mb_exit() {
+    if (s.logged_in) {
+        mb_printf("Logging out...\r\n");
+    }
     int sz = sizeof(char) + sizeof(u8) + USERNAME_SZ + MAX_PIN_SZ + sizeof(song_md);
     memset((void*)&s, 0, sz);
 }

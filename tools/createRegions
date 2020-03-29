@@ -54,18 +54,18 @@ def main(region_dict, file_name):
         sys.exit(e)
     chunkKey.close()
 
-    # 256-bit key for simon cipher
+    # 256-bit key for speck cipher
     try:
-        simon = open(os.path.abspath(dir+"simon_key"), "wb")
+        speck = open(os.path.abspath(dir+"speck_key"), "wb")
     except Exception as e:
-        print("Unable to open simon_key file: %s" % (e,))
+        print("Unable to open speck_key file: %s" % (e,))
         sys.exit(e)
     try:
-        simon.write(get_random_bytes(32)) # 256-bit key
+        speck.write(get_random_bytes(32)) # 256-bit key
     except Exception as e:
-        print("Unable to write to simon_key file: %s" % (e,))
+        print("Unable to write to speck_key file: %s" % (e,))
         sys.exit(e)
-    simon.close()
+    speck.close()
 
 # removes filename from path
 # Ex. './a/b/file.txt' --> './a/b/'

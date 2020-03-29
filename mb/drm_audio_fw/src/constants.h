@@ -83,7 +83,7 @@ start
 | Hash                       |      metadata key
 | (32 bytes)                 |
 |____________________________|
-| Simon CBC Initialization   |
+| Speck CBC Initialization   |
 | Vector                     |
 | (16 bytes)                 |
 |____________________________|
@@ -127,7 +127,7 @@ typedef struct __attribute__((__packed__)) {
     u32 wav_size;           // size of file
     // drm song metadata
     char mdHash[32];        // metadata hash
-    char iv[16];            // Simon initialization vector
+    char iv[16];            // Speck initialization vector
     int numChunks;          // number of encrypted audio chunks
     int encAudioLen;        // length of encrypted audio
     drm_md md;              // song metadata
@@ -180,10 +180,10 @@ typedef struct {
     char username[USERNAME_SZ];     // logged on username
     char pin[MAX_PIN_SZ];           // logged on pin
     song_md song_md;                // current song metadata
-    char simonKey[44];              // base64 decoded Simon key
-    char mdKey[44];                 // base64 decoded metadata key
-    char chunkKey[44];              // base64 decoded encrypted audio chunk key
-    u64 rk[34];                     // round keys for Speck
+    char speckKey[64];              // base64 decoded Speck key
+    char mdKey[64];                 // base64 decoded metadata key
+    char chunkKey[64];              // base64 decoded encrypted audio chunk key
+    u64 rk[64];                     // round keys for Speck
 } internal_state;
 
 

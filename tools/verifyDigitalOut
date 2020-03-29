@@ -27,5 +27,10 @@ except wave.Error:
         dout_samples = f.read()
 print('dout_samples: ',len(dout_samples))
 print('true_samples: ',len(true_samples))
+mismatches = 0
+for i in range(len(true_samples)):
+    if dout_samples[i] != true_samples[i]:
+        mismatches = mismatches + 1
+print('mismatches:',mismatches)
 assert(dout_samples == true_samples)
 print('digital_out SUCCESSFUL')
