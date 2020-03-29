@@ -43,15 +43,15 @@ def main(region_names, user_names, user_secrets, region_secrets, device_dir, reg
               "Please ensure all regions entered are in the list: {user_secrets}".format(e=e, user_secrets=user_secrets.keys()))
         return
 
-    # get simon key
+    # get speck key
     try:
-        simon_path = os.path.abspath(get_path(region_secrets_path)+'simon_key')
-        simon = open(simon_path, 'rb')
+        speck_path = os.path.abspath(get_path(region_secrets_path)+'speck_key')
+        speck = open(speck_path, 'rb')
     except Exception as e:
-        print('Unable to open simon_key file: {e}'.format(e=e))
+        print('Unable to open speck_key file: {e}'.format(e=e))
         return
-    simon_key = simon.read(32)
-    simon.close()
+    speck_key = speck.read(32)
+    speck.close()
 
     # get hash metadata key
     try:
@@ -100,10 +100,10 @@ const char *PROVISIONED_B64PIN_HASHES[] = {{ {", ".join(['"' + str(b64encode(bla
 
 /* BASE64 DECODE KEYS BEFORE USING */
 
-#define SIMON_BLK_SZ 16
-#define SIMON_KEY_SZ {len(simon_key)}
-#define b64SIMON_KEY_SZ {len(b64encode(simon_key))}
-const char *SIMON_KEY = {'"'+str(b64encode(simon_key)).strip("b'")+'"'};
+#define SPECK_BLK_SZ 16
+#define SPECK_KEY_SZ {len(speck_key)}
+#define b64SPECK_KEY_SZ {len(b64encode(speck_key))}
+const char *SPECK_KEY = {'"'+str(b64encode(speck_key)).strip("b'")+'"'};
 
 #define MD_KEY_SZ {len(mdKey)}
 #define b64MD_KEY_SZ {len(b64encode(mdKey))}

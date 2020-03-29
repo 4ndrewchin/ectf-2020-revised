@@ -12,28 +12,29 @@ import numpy as np
 from argparse import ArgumentParser
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import unpad
+from speck import SpeckCipher
 from simon import SimonCipher
 from blake3 import blake3
 
 CHUNK_SZ = 16000
 
-def simon_decrypt_chunk(cipher, chunk, len):
-   p_chunk = bytes()
+def speck_decrypt_chunk(cipher, chunk, len):
+   p_chunk = bytearray()
    for i in range(0,len,AES.block_size):
-      dec_simon_chunk = cipher.decrypt(int.from_bytes(chunk[i:i+AES.block_size], byteorder='little', signed='False'))
-      dec_simon_chunk = dec_simon_chunk.to_bytes(AES.block_size, byteorder='little')
-      p_chunk += dec_simon_chunk
+      dec_speck_chunk = cipher.decrypt(int.from_bytes(chunk[i:i+AES.block_size], byteorder='little', signed='False'))
+      dec_speck_chunk = dec_speck_chunk.to_bytes(AES.block_size, byteorder='little')
+      p_chunk += dec_speck_chunk
    return p_chunk
 
-def unprotect(infile, outfile, simonkey_f, mdKeyFile, chunkKeyFile):
-   # read simonkey_f into byte buffer
+def unprotect(infile, outfile, speckkey_f, mdKeyFile, chunkKeyFile):
+   # read speckkey_f into byte buffer
    try:
-      simon = open(os.path.abspath(simonkey_f), 'rb')
+      speck = open(os.path.abspath(speckkey_f), 'rb')
    except Exception as e:
-      print('Unable to open simon_key file: %s' % (e,))
+      print('Unable to open speck_key file: %s' % (e,))
       return 0
-   simon_key = simon.read(32) #256/8
-   simon.close()
+   speck_key = speck.read(32) #256/8
+   speck.close()
 
    #read blake3 hash keys into buffer
    try:
@@ -94,7 +95,7 @@ def unprotect(infile, outfile, simonkey_f, mdKeyFile, chunkKeyFile):
    end_meta_data = end_iv+8+meta_data_len
    meta_data = data[end_iv+8:end_meta_data]
 
-   # get the encrypted simon audio
+   # get the encrypted speck audio
    enc_audio = data[end_meta_data:end_meta_data+intAudioLength]
 
    # get all hashes of each block
@@ -113,23 +114,23 @@ def unprotect(infile, outfile, simonkey_f, mdKeyFile, chunkKeyFile):
       return 0
    print('success', flush=True)
 
-   # decrypt audio using simon key
+   # decrypt audio using speck key
    md_size = meta_data[0] #first byte of song metadata is length
    if md_size > 100:
       print('Something is wrong. Metadata max size is 100, got %s' % md_size, flush=True)
       return 0
-   simonkey_int = int.from_bytes(simon_key, byteorder='little', signed='False')
+   speckkey_int = int.from_bytes(speck_key, byteorder='little', signed='False')
    iv_int = int.from_bytes(iv, byteorder='little', signed='False')
-   cipher = SimonCipher(simonkey_int, 256, 128, 'CBC', iv_int)
+   cipher = SpeckCipher(speckkey_int, 256, 128, 'CBC', iv_int)
 
    #decrypting in chunks
    rem = len(enc_audio)
    print('Total encrypted length: '+str(rem), flush=True)
-   audio = bytes()
+   audio = bytearray()
    print('Number of 16KB chunks: '+str(intNumChunks), flush=True)
    counter = 0
    start = 0
-   print('Verifying chunks and decrypting (this will take awhile)...', end='', flush=True)
+   print('Verifying chunks and decrypting...', end='', flush=True)
    for i in range(0, intNumChunks):
 
       counter = counter + 1
@@ -152,7 +153,7 @@ def unprotect(infile, outfile, simonkey_f, mdKeyFile, chunkKeyFile):
          return 0
 
       # decrypt block
-      p_chunk = simon_decrypt_chunk(cipher, e_chunk, increment)
+      p_chunk = speck_decrypt_chunk(cipher, e_chunk, increment)
 
       if i == intNumChunks-1:
          p_chunk = unpad(p_chunk, AES.block_size)
@@ -186,12 +187,12 @@ def main():
    parser = ArgumentParser(description='main interface to unprotect songs')
    parser.add_argument('--outfile', help='path to save the unprotected song', required=True)
    parser.add_argument('--infile', help='path to protected song', required=True)
-   parser.add_argument('--simon', help='path to simon key file', required=True)
+   parser.add_argument('--speck', help='path to speck key file', required=True)
    parser.add_argument('--mdKey', help='path to metadata key file', required=True)
    parser.add_argument('--chunkKey', help='path to chunk key file', required=True)
    args = parser.parse_args()
 
-   unprotect(args.infile, args.outfile, args.simon, args.mdKey, args.chunkKey)
+   unprotect(args.infile, args.outfile, args.speck, args.mdKey, args.chunkKey)
 
 if __name__ == '__main__':
    main()

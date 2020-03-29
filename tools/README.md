@@ -64,12 +64,12 @@ Args:
 
 ### unprotectSong
 Syntax:
-> ./unprotectSong --outfile <PATH_TO_OUTPUT_SONG> --infile <PATH_TO_SONG> --simon <PATH_TO_SIMON_KEY> --mdKey <PATH_TO_METADATA_KEY> --chunkKey <PATH_TO_CHUNK_KEY>
+> ./unprotectSong --outfile <PATH_TO_OUTPUT_SONG> --infile <PATH_TO_SONG> --speck <PATH_TO_SPECK_KEY> --mdKey <PATH_TO_METADATA_KEY> --chunkKey <PATH_TO_CHUNK_KEY>
 
 Args:
 - <PATH_TO_OUTPUT_SONG> : the absolute or relative path to save the output song to.
 - <PATH_TO_SONG> : the absolute or relative path to the input song to unprotect.
-- <PATH_TO_SIMON_KEY> : the absolute or relative path to the 256-bit Simon key file to decrypt the song with.
+- <PATH_TO_SPECK_KEY> : the absolute or relative path to the 256-bit Speck key file to decrypt the song with.
 - <PATH_TO_METADATA_KEY> : the absolute or relative path to the 256-bit key file to use for Blake3 metadata hashes.
 - <PATH_TO_CHUNK_KEY> : the absolute or relative path to the 256-bit key file to use for Blake3 chunk hashes.
 

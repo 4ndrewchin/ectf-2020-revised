@@ -15,6 +15,7 @@ import numpy as np
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import pad
 from Cryptodome.Random import get_random_bytes
+from speck import SpeckCipher
 from simon import SimonCipher
 from blake3 import blake3
 
@@ -43,10 +44,10 @@ class ProtectedSong(object):
         protected_wav.setsampwidth(self.original_song.getsampwidth())
         protected_wav.setframerate(self.original_song.getframerate())
 
-        # read Simon 256 bit key
-        simon = open(os.path.abspath(self.path_to_keys+'simon_key'),'rb')
-        simon_key = simon.read(32)
-        simon.close()
+        # read Speck 256 bit key
+        speck = open(os.path.abspath(self.path_to_keys+'speck_key'),'rb')
+        speck_key = speck.read(32)
+        speck.close()
 
         # read blake3 hash keys
         mdKeyFile = open(os.path.abspath(self.path_to_keys+'md_key'),'rb')
@@ -57,20 +58,20 @@ class ProtectedSong(object):
         chunkKey = chunkKeyFile.read()
         chunkKeyFile.close()
 
-        # encrypt audio data using Simon (128 bit blocks, 256 bit key)
-        print('Encrypting audio (this will take a while)...', end='', flush=True)
+        # encrypt audio data using Speck (128 bit blocks, 256 bit key)
+        print('Encrypting audio...', end='', flush=True)
         sys.stdout.flush()
-        simonkey_int = int.from_bytes(simon_key, byteorder='little', signed='False')
+        speckkey_int = int.from_bytes(speck_key, byteorder='little', signed='False')
         iv = get_random_bytes(16)
         iv_int = int.from_bytes(iv, byteorder='little', signed='False')
-        cipher = SimonCipher(simonkey_int, 256, 128, 'CBC', iv_int)
+        cipher = SpeckCipher(key=speckkey_int, key_size=256, block_size=128, mode='CBC', init=iv_int)
         padded_audio = pad(bytes(self.full_song), AES.block_size)
-        enc_audio = bytes()
-        # simon can only encrypt block_size bytes at a time :(
+        enc_audio = bytearray()
+        # speck can only encrypt block_size bytes at a time
         for i in range(0,len(padded_audio),AES.block_size):
-            enc_simon_chunk = cipher.encrypt(int.from_bytes(padded_audio[i:i+AES.block_size], byteorder='little', signed='False'))
-            enc_simon_chunk = enc_simon_chunk.to_bytes(AES.block_size, byteorder='little')
-            enc_audio += enc_simon_chunk
+            enc_speck_chunk = cipher.encrypt(int.from_bytes(padded_audio[i:i+AES.block_size], byteorder='little', signed='False'))
+            enc_speck_chunk = enc_speck_chunk.to_bytes(AES.block_size, byteorder='little')
+            enc_audio += enc_speck_chunk
 
         # calculate and convert total chucks and encrypted song length 
         numChunks = math.ceil(len(enc_audio) / CHUNK_SZ)
