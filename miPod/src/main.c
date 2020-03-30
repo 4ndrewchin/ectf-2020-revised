@@ -99,16 +99,14 @@ size_t load_file(char *fname, char *song_buf) {
 
 // attempts to log in for a user
 void login(char *username, char *pin) {
-    // TODO: verify length of username and pin & check for illegal chars
     if (!username || !pin) {
         mp_printf("Invalid user name/PIN\r\n");
-        //print_help();
         return;
     }
 
     // drive DRM
-    strcpy((void*)c->username, username);
-    strcpy((void*)c->pin, pin);
+    strncpy((void*)c->username, username, USERNAME_SZ);
+    strncpy((void*)c->pin, pin, MAX_PIN_SZ);
     send_command(LOGIN);
     while (c->drm_state == STOPPED) continue; // wait for DRM to start working
     while (c->drm_state == WORKING) continue; // wait for DRM to finish working
@@ -201,7 +199,6 @@ void share_song(char *song_name, char *username) {
 
     if (!song_name || !username) {
         mp_printf("Need song name and username\r\n");
-        //print_help();
         return;
     }
 
@@ -211,7 +208,7 @@ void share_song(char *song_name, char *username) {
         return;
     }
 
-    strcpy((char *)c->username, username);
+    strncpy((char *)c->username, username, USERNAME_SZ);
 
     // drive DRM
     send_command(SHARE);
@@ -332,7 +329,6 @@ int play_song(char *song_name) {
             }
         } else {
             mp_printf("Unrecognized command. Try 'help'.\r\n");
-            //print_playback_help();
         }
     }
 
@@ -447,7 +443,6 @@ int main(int argc, char** argv)
             break;
         } else {
             mp_printf("Unrecognized command. Try 'help'.\r\n");
-            //print_help();
         }
     }
 

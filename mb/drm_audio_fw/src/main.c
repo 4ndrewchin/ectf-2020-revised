@@ -66,20 +66,6 @@ void myISR(void) {
 #define DR64(x,y,k) (y^=x, y=ROTR64(y,3), x^=k, x-=y, x=ROTL64(x,8))
 
 
-/* Compute Speck 128/256 key schedule given a pointer to a char buffer
- * containing the key -- only called once per boot
- */ 
-/*void Speck128256KeySchedule(u64* K) {
-    int i;
-    u64 D=K[3], C=K[2], B=K[1], A=K[0];
-    for (i=0; i<33; i += 3) {
-        s.rk[i]=A; ER64(B,A,i);
-        s.rk[i]=A; ER64(C,A,i+1);
-        s.rk[i]=A; ER64(D,A,i+2);
-    }
-    s.rk[i]=A;
-}*/
-
 /* Speck 128/256 decryption using CBC mode
  *
  * inCt     : pointer to the ciphertext to decrypt
@@ -192,7 +178,7 @@ int uid_to_username(char uid, char **username, int provisioned_only) {
 // looks up the uid corresponding to the username
 int username_to_uid(char *username, char *uid, int provisioned_only) {
     for (int i = 0; i < NUM_USERS; i++) {
-        if (!strcmp(username, USERNAMES[USER_IDS[i]]) &&
+        if (!strncmp(username, USERNAMES[USER_IDS[i]], USERNAME_SZ) &&
             (!provisioned_only || is_provisioned_uid(USER_IDS[i]))) {
             *uid = USER_IDS[i];
             return TRUE;
@@ -363,7 +349,7 @@ void login() {
     } else {
         for (int i = 0; i < NUM_PROVISIONED_USERS; i++) {
             // search for matching username
-            if (!strcmp(s.username, USERNAMES[PROVISIONED_UIDS[i]])) {
+            if (!strncmp(s.username, USERNAMES[PROVISIONED_UIDS[i]], USERNAME_SZ)) {
                 // basedecode pin hash
                 word32 outLen = B64_PIN_HASH_SZ;
                 char saltedHash[B64_PIN_HASH_SZ];
@@ -418,11 +404,11 @@ void query_player() {
     c->query.num_users = NUM_PROVISIONED_USERS;
 
     for (int i = 0; i < NUM_PROVISIONED_REGIONS; i++) {
-        strcpy((char *)q_region_lookup(c->query, i), REGION_NAMES[PROVISIONED_RIDS[i]]);
+        strncpy((char *)q_region_lookup(c->query, i), REGION_NAMES[PROVISIONED_RIDS[i]], REGION_NAME_SZ);
     }
 
     for (int i = 0; i < NUM_PROVISIONED_USERS; i++) {
-        strcpy((char *)q_user_lookup(c->query, i), USERNAMES[i]);
+        strncpy((char *)q_user_lookup(c->query, i), USERNAMES[i], USERNAME_SZ);
     }
 }
 
@@ -448,18 +434,18 @@ void query_song() {
 
     // copy owner name
     uid_to_username(s.song_md.owner_id, &name, FALSE);
-    strcpy((char *)c->query.owner, name);
+    strncpy((char *)c->query.owner, name, USERNAME_SZ);
 
     // copy region names
     for (int i = 0; i < s.song_md.num_regions; i++) {
         rid_to_region_name(s.song_md.rids[i], &name, FALSE);
-        strcpy((char *)q_region_lookup(c->query, i), name);
+        strncpy((char *)q_region_lookup(c->query, i), name, REGION_NAME_SZ);
     }
 
     // copy authorized uid names
     for (int i = 0; i < s.song_md.num_users; i++) {
         uid_to_username(s.song_md.uids[i], &name, FALSE);
-        strcpy((char *)q_user_lookup(c->query, i), name);
+        strncpy((char *)q_user_lookup(c->query, i), name, USERNAME_SZ);
     }
 }
 
@@ -468,7 +454,6 @@ void query_song() {
 // on error, set c->song.wav_size = 0 to notify miPod
 void share_song() {
     char uid;
-    int nchunks = c->song.numChunks;
 
     // reject non-owner attempts to share
     if (!s.logged_in) {
@@ -495,7 +480,7 @@ void share_song() {
     // only allow MAX_USERS shares -- much simpler alternative to hash map
     // a song owner may share a song with one user 64 times and
     // prevent it from being shared with anybody else; however,
-    // we can no longer overflow s.song_md.num_users in line 507
+    // we can no longer overflow s.song_md.num_users
     if (s.song_md.num_users >= MAX_USERS) {
         mb_printf("Cannot share song\r\n");
         c->song.wav_size = 0;
@@ -535,8 +520,6 @@ void share_song() {
 // if error occurs during playback, simply break out of the playback loop
 void play_song() {
     u32 counter = 0, cp_num, cp_xfil_cnt, offset, dma_cnt, lenAudio, *fifo_fill;
-    // for function return values
-    int ret;
     // rem is the outBytes of audio remaining to play during the play loop
     // we need rem to be signed so we can check if under 0
     int rem;
