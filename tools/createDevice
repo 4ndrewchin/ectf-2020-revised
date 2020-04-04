@@ -96,22 +96,22 @@ const u8 USER_IDS[] = {{ {", ".join([str(user_secrets[u]['id']) for u in user_na
 const u8 PROVISIONED_UIDS[] = {{ {", ".join(uids)} }};
 /* BASE64 DECODE HASHES BEFORE COMPARING */
 #define B64_PIN_HASH_SZ 44
-const char *PROVISIONED_B64PIN_HASHES[] = {{ {", ".join(['"' + str(b64encode(blake3((user_secrets[u]['pin']+u).encode()).digest())).strip("b'") + '"' for u in user_names])} }};
+const char *PROVISIONED_B64PIN_HASHES[] = {{ {", ".join(['"' + str(b64encode(blake3((user_secrets[u]['pin']+u).encode()).digest()))[2:-1] + '"' for u in user_names])} }};
 
 /* BASE64 DECODE KEYS BEFORE USING */
 
 #define SPECK_BLK_SZ 16
 #define SPECK_KEY_SZ {len(speck_key)}
 #define b64SPECK_KEY_SZ {len(b64encode(speck_key))}
-const char *SPECK_KEY = {'"'+str(b64encode(speck_key)).strip("b'")+'"'};
+const char *SPECK_KEY = {'"'+str(b64encode(speck_key))[2:-1]+'"'};
 
 #define MD_KEY_SZ {len(mdKey)}
 #define b64MD_KEY_SZ {len(b64encode(mdKey))}
-const char *MD_KEY = {'"'+str(b64encode(mdKey)).strip("b'")+'"'};
+const char *MD_KEY = {'"'+str(b64encode(mdKey))[2:-1]+'"'};
 
 #define CHUNK_KEY_SZ {len(chunkKey)}
 #define b64CHUNK_KEY_SZ {len(b64encode(chunkKey))}
-const char *CHUNK_KEY = {'"'+str(b64encode(chunkKey)).strip("b'")+'"'};
+const char *CHUNK_KEY = {'"'+str(b64encode(chunkKey))[2:-1]+'"'};
 
 #endif // SECRETS_H
 ''')
